@@ -10,3 +10,6 @@ user_data
 tmp
 debug
 .fastembed_cache
+presenton
+database
+fastembed_vectorstore
