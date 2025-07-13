@@ -7,15 +7,14 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { filepath: string[] } },
 ) {
-  const BASE_DIR = "/app";
-
   const filepath = params.filepath.join("/");
 
   if (!params.filepath) {
     return new NextResponse('No file specified', { status: 400 });
   }
 
-  const filePath = path.join(BASE_DIR, filepath);
+  // Handle absolute paths directly since the filepath already contains the full path
+  const filePath = filepath.startsWith('/') ? filepath : `/${filepath}`;
 
   if (!fs.existsSync(filePath)) {
     return new NextResponse('File not found', { status: 404 });

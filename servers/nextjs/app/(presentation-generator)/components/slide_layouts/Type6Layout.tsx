@@ -107,7 +107,9 @@ const Type6Layout = ({
                       color: currentColors.iconBg,
                     }}
                   >
-                    {numberTranslations[language][index || 0]}
+                    {numberTranslations[language]?.[index] || 
+                     numberTranslations["English"]?.[index] || 
+                     (index + 1).toString().padStart(2, '0')}
                   </div>
                   <div className="space-y-1">
                     <EditableText

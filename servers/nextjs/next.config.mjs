@@ -47,6 +47,10 @@ const nextConfig = {
       source: "/static/:path*",
       destination: "/api/static/:path*",
     },
+    {
+      source: "/api/v1/ppt/:path*",
+      destination: "http://localhost:8000/api/v1/ppt/:path*",
+    },
   ],
 };
 

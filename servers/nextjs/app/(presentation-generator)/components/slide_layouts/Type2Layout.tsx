@@ -137,7 +137,9 @@ const Type2Layout = ({
                   data-element-type="text"
                   data-element-id={`slide-${slideIndex}-timeline-number-text-${index}`}
                 >
-                  {numberTranslations[language][index || 0]}
+                  {numberTranslations[language]?.[index] || 
+                   numberTranslations["English"]?.[index] || 
+                   (index + 1).toString().padStart(2, '0')}
                 </span>
               </div>
             ))}
@@ -213,11 +215,9 @@ const Type2Layout = ({
                       color: currentColors.iconBg,
                     }}
                   >
-                    {
-                      numberTranslations[
-                      language as keyof typeof numberTranslations
-                      ][index]
-                    }
+                    {numberTranslations[language]?.[index] || 
+                     numberTranslations["English"]?.[index] || 
+                     (index + 1).toString().padStart(2, '0')}
                   </div>
                 )}
                 <ElementMenu index={index} handleDeleteItem={onDeleteItem} />
@@ -295,11 +295,9 @@ const Type2Layout = ({
                   color: currentColors.iconBg,
                 }}
               >
-                {
-                  numberTranslations[
-                  language as keyof typeof numberTranslations
-                  ][index]
-                }
+                {numberTranslations[language]?.[index] || 
+                 numberTranslations["English"]?.[index] || 
+                 (index + 1).toString().padStart(2, '0')}
               </div>
             )}
             <div className="space-y-2 lg:space-y-4">

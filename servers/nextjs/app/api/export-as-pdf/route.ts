@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
   const page = await browser.newPage();
-  await page.goto(`http://localhost/pdf-maker?id=${id}`, { waitUntil: 'networkidle0' });
+  await page.goto(`http://localhost:3000/pdf-maker?id=${id}`, { waitUntil: 'networkidle0' });
 
   const pdfBuffer = await page.pdf({
     printBackground: true,

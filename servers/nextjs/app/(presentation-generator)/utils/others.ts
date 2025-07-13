@@ -269,6 +269,11 @@ export function sanitizeFilename(input: string, replacement = '') {
 
 
 export function getStaticFileUrl(filepath: string): string {
+  // Handle absolute paths by keeping the full path after /static/
+  if (filepath.startsWith('/')) {
+    return `/static${filepath}`;
+  }
+  // For relative paths, keep the original logic
   const pathParts = filepath.split('/');
   const relevantPath = pathParts.slice(2).join('/');
   return path.join("/static", relevantPath);

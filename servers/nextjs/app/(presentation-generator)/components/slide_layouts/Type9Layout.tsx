@@ -106,7 +106,9 @@ const Type9Layout = ({
                         color: currentColors.iconBg,
                       }}
                     >
-                      {numberTranslations[language][index || 0]}
+                      {numberTranslations[language]?.[index] || 
+                       numberTranslations["English"]?.[index] || 
+                       (index + 1).toString().padStart(2, '0')}
                     </div>
 
                     <div className="lg:space-y-2 ">
