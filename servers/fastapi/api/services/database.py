@@ -1,11 +1,14 @@
 from contextlib import contextmanager
 import os
+import tempfile
 from sqlalchemy import create_engine
 from sqlmodel import Session
 
 
+# 確保APP_DATA_DIRECTORY有值，如果沒有則使用臨時目錄
+app_data_dir = os.getenv("APP_DATA_DIRECTORY") or tempfile.gettempdir()
 database_url = os.getenv("DATABASE_URL") or "sqlite:///" + os.path.join(
-    os.getenv("APP_DATA_DIRECTORY"), "fastapi.db"
+    app_data_dir, "fastapi.db"
 )
 connect_args = {}
 if "sqlite" in database_url:

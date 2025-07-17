@@ -78,9 +78,9 @@ class LLMHeadingModelWithValidation(LLMHeadingModel):
 
 class LLMHeadingModelWithImagePromptWithValidation(LLMHeadingModelWithImagePrompt):
     image_prompt: str = Field(
-        description="Item image prompt in about 10 words",
+        description="Item image prompt in about 10-15 words",
         min_length=10,
-        max_length=100,
+        max_length=200,
     )
 
 
@@ -107,9 +107,9 @@ class LLMType1ContentWithValidation(LLMType1Content):
         max_length=300,
     )
     image_prompt: str = Field(
-        description="Slide image prompt in about 5 words",
+        description="Slide image prompt in about 10-15 words",
         min_length=10,
-        max_length=30,
+        max_length=200,
     )
 
 
@@ -128,9 +128,9 @@ class LLMType3ContentWithValidation(LLMType3Content):
         max_length=3,
     )
     image_prompt: str = Field(
-        description="Slide image prompt in about 5 words",
+        description="Slide image prompt in about 10-15 words",
         min_length=10,
-        max_length=30,
+        max_length=200,
     )
 
 

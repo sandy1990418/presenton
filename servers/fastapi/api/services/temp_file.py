@@ -1,12 +1,21 @@
 import os
 import uuid
+import tempfile
 from typing import Optional, Union
 
 
 class TempFileService:
-    base_dir = os.getenv("TEMP_DIRECTORY")
-
     def __init__(self):
+        # 使用環境變數或默認臨時目錄
+        self.base_dir = os.getenv("TEMP_DIRECTORY") or tempfile.gettempdir()
+        
+        # 確保base_dir不是None
+        if self.base_dir is None:
+            self.base_dir = tempfile.mkdtemp()
+        
+        # 創建presenton特定的臨時目錄
+        self.base_dir = os.path.join(self.base_dir, "presenton_temp")
+        
         self.cleanup_base_dir()
         os.makedirs(self.base_dir, exist_ok=True)
 
@@ -62,4 +71,5 @@ class TempFileService:
             os.rmdir(dir_path)
 
     def cleanup_base_dir(self):
-        self.cleanup_temp_dir(self.base_dir)
+        if self.base_dir and os.path.exists(self.base_dir):
+            self.cleanup_temp_dir(self.base_dir)

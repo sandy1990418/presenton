@@ -8,12 +8,19 @@ from ppt_config_generator.models import PresentationMarkdownModel
 
 
 def get_prompt_template(prompt: str, n_slides: int, language: str, content: str, images: list = None):
+    from .image_integration_service import image_integration_service
+    
     images_info = ""
+    image_integration_prompt = ""
+    
     if images:
         images_info = f"""
-        - Reference Images: {len(images)} images provided
+        - Reference Images: {len(images)} images provided (including extracted images from documents)
         - Image Integration: Each relevant image should be referenced in slide notes with specific placement suggestions
         """
+        
+        # 生成詳細的圖片整合提示
+        image_integration_prompt = image_integration_service.generate_image_integration_prompts(images)
     
     return [
         {
@@ -52,11 +59,14 @@ def get_prompt_template(prompt: str, n_slides: int, language: str, content: str,
                 
                 # Content Guidelines
                 
-                - **Depth**: Each slide should contain 3-5 substantial points, not just bullet lists
-                - **Evidence**: Include specific examples, case studies, or data to support key points
-                - **Context**: Provide background information and explain why points matter
-                - **Actionability**: Include practical applications and implementation steps
-                - **Engagement**: Use storytelling techniques and real-world scenarios
+                - **Professional Depth**: Create content that matches the sophistication of business consulting presentations
+                - **Technical Accuracy**: Include specific metrics, KPIs, and quantifiable outcomes
+                - **Strategic Framework**: Use established business frameworks (SWOT, Porter's Five Forces, etc.)
+                - **Implementation Focus**: Provide detailed roadmaps with timelines and resource requirements
+                - **Risk Assessment**: Include potential challenges and mitigation strategies
+                - **ROI Analysis**: Quantify benefits and provide cost-benefit calculations where relevant
+                - **Industry Context**: Reference current market trends and competitive landscape
+                - **Best Practices**: Include proven methodologies and case studies from leading companies
                 
                 # Technical Requirements
                 
@@ -88,15 +98,19 @@ def get_prompt_template(prompt: str, n_slides: int, language: str, content: str,
                 - Additional Context: {content}
                 {images_info}
                 
+                {image_integration_prompt}
+                
                 **Requirements:**
                 - Create a presentation that matches professional business standards
                 - Include specific, actionable insights rather than generic content
                 - Integrate visual elements and data visualizations
                 - Provide comprehensive speaker notes and presentation guidance
                 - Ensure logical flow and narrative coherence
+                - **CRITICAL**: Use the provided reference images (especially extracted ones) as the foundation for content creation
+                - Match the technical depth and professional quality shown in reference materials
                 
                 **Target Audience:** Business professionals, stakeholders, and decision-makers
-                **Presentation Style:** Professional, data-driven, actionable
+                **Presentation Style:** Professional, data-driven, actionable, technically accurate
             """,
         },
     ]
