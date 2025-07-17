@@ -52,6 +52,30 @@ const nextConfig = {
       destination: "http://localhost:8000/api/v1/ppt/:path*",
     },
   ],
+  
+  // 增加超時時間和連接設置
+  experimental: {
+    proxyTimeout: 300000, // 5分鐘
+  },
+  
+  // 自定義 API 路由配置
+  async headers() {
+    return [
+      {
+        source: '/api/:path*',
+        headers: [
+          {
+            key: 'Connection',
+            value: 'keep-alive',
+          },
+          {
+            key: 'Keep-Alive',
+            value: 'timeout=300, max=1000',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

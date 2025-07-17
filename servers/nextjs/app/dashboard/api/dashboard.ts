@@ -2,6 +2,7 @@ import {
   getHeader,
   getHeaderForFormData,
 } from "@/app/(presentation-generator)/services/api/header";
+import { apiClient } from "@/utils/apiClient";
 
 
 
@@ -27,20 +28,16 @@ export class DashboardApi {
 
   static async getPresentations(): Promise<PresentationResponse[]> {
     try {
-      const response = await fetch(
-        `/api/v1/ppt/user_presentations`,
-        {
-          method: "GET",
-        }
-      );
-      if (response.status === 200) {
-        const data = await response.json();
-        return data;
+      const response = await apiClient.get<PresentationResponse[]>('/user_presentations');
+      
+      if (response.success && response.data) {
+        return response.data;
       } else if (response.status === 404) {
         console.log("No presentations found");
         return [];
       }
-      return [];
+      
+      throw new Error(response.error || 'Failed to fetch presentations');
     } catch (error) {
       console.error("Error fetching presentations:", error);
       throw error;
@@ -48,18 +45,13 @@ export class DashboardApi {
   }
   static async getPresentation(id: string) {
     try {
-      const response = await fetch(
-        `/api/v1/ppt/presentation?presentation_id=${id}`,
-        {
-          method: "GET",
-
-        }
-      );
-      if (response.status === 200) {
-        const data = await response.json();
-        return data;
+      const response = await apiClient.get(`/presentation?presentation_id=${id}`);
+      
+      if (response.success && response.data) {
+        return response.data;
       }
-      throw new Error("Presentation not found");
+      
+      throw new Error(response.error || "Presentation not found");
     } catch (error) {
       console.error("Error fetching presentations:", error);
       throw error;

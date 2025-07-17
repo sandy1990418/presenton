@@ -77,7 +77,11 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    timeout=300,  # 5分鐘請求超時
+    debug=False
+)
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
@@ -85,6 +89,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=3600,  # 預檢請求緩存時間
 )
 
 
@@ -93,6 +98,25 @@ async def update_env_middleware(request: Request, call_next):
     if can_change_keys:
         update_env_with_user_config()
     return await call_next(request)
+
+
+@app.middleware("http")
+async def timeout_middleware(request: Request, call_next):
+    try:
+        # 為長時間運行的端點設置更長的超時時間
+        if "/create" in str(request.url) or "/generate" in str(request.url):
+            timeout = 300  # 5分鐘
+        else:
+            timeout = 60   # 1分鐘
+        
+        response = await asyncio.wait_for(call_next(request), timeout=timeout)
+        return response
+    except asyncio.TimeoutError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=504, detail="Request timeout")
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 app.include_router(presentation_router)

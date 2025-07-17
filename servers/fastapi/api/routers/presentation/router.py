@@ -404,3 +404,15 @@ async def list_custom_models(
         logging_service,
         log_metadata,
     )
+
+
+# 健康檢查端點
+@presentation_router.get("/health")
+async def health_check():
+    """健康檢查端點，用於監控服務器狀態"""
+    from datetime import datetime
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": "presenton-api"
+    }

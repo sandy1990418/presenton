@@ -1,5 +1,6 @@
 import { getHeader, getHeaderForFormData } from "./header";
 import { IconSearch, ImageGenerate, ImageSearch } from "./params";
+import { longRunningApiClient, apiClient } from "@/utils/apiClient";
 
 export class PresentationGenerationApi {
 
@@ -203,21 +204,16 @@ export class PresentationGenerationApi {
 
   static async generateData(presentationData: any) {
     try {
-      const response = await fetch(
-        `/api/v1/ppt/generate/data`,
-        {
-          method: "POST",
-          headers: getHeader(),
-          body: JSON.stringify(presentationData),
-          cache: "no-cache",
-        }
-      );
-      if (response.ok) {
-        const data = await response.json();
+      const response = await longRunningApiClient.post('/generate/data', presentationData, {
+        timeout: 600000, // 10分鐘超時
+        retries: 3,
+        retryDelay: 3000
+      });
 
-        return data;
+      if (response.success && response.data) {
+        return response.data;
       } else {
-        throw new Error(`Failed to generate data: ${response.statusText}`);
+        throw new Error(response.error || `Failed to generate data: ${response.status}`);
       }
     } catch (error) {
       console.error("error in data generation", error);
@@ -425,27 +421,22 @@ export class PresentationGenerationApi {
 
   }) {
     try {
-      const response = await fetch(
-        `/api/v1/ppt/create`,
-        {
-          method: "POST",
-          headers: getHeader(),
-          body: JSON.stringify({
-            prompt,
-            n_slides,
-            language,
-            documents,
-            images,
+      const response = await longRunningApiClient.post('/create', {
+        prompt,
+        n_slides,
+        language,
+        documents,
+        images,
+      }, {
+        timeout: 600000, // 10分鐘超時
+        retries: 5,
+        retryDelay: 5000 // 5秒重試延遲
+      });
 
-          }),
-          cache: "no-cache",
-        }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        return data;
+      if (response.success && response.data) {
+        return response.data;
       } else {
-        throw new Error(`Failed to get questions: ${response.statusText}`);
+        throw new Error(response.error || `Failed to get questions: ${response.status}`);
       }
     } catch (error) {
       console.error("error in question generation", error);

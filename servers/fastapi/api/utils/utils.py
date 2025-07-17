@@ -163,14 +163,49 @@ async def handle_errors(
         print(traceback.print_stack())
         print(traceback.print_exc())
 
-        log_metadata.status_code = 400
+        error_message = str(e)
+        
+        # 改進錯誤消息處理
+        if "OpenAI" in error_message or "openai" in error_message.lower():
+            if "400" in error_message:
+                if "schema" in error_message.lower():
+                    error_message = "AI service configuration error. Please contact support."
+                else:
+                    error_message = "Invalid request to AI service. Please check your input and try again."
+            elif "401" in error_message:
+                error_message = "Authentication failed. Please check your API key configuration."
+            elif "429" in error_message:
+                error_message = "Rate limit exceeded. Please try again in a moment."
+            else:
+                error_message = "An error occurred with the AI service. Please try again."
+        elif "timeout" in error_message.lower():
+            error_message = "The request took too long to process. Please try again."
+        elif "connection" in error_message.lower():
+            error_message = "Unable to connect to the service. Please check your internet connection and try again."
+        elif "vertex" in error_message.lower() or "google" in error_message.lower():
+            error_message = "Google AI service error. Please check your configuration and try again."
+        else:
+            error_message = "Something went wrong while processing your request."
+        
+        # 返回適當的 HTTP 狀態碼
+        status_code = 500
+        if "400" in str(e):
+            status_code = 400
+        elif "401" in str(e):
+            status_code = 401
+        elif "429" in str(e):
+            status_code = 429
+        elif "timeout" in str(e).lower():
+            status_code = 504
+
+        log_metadata.status_code = status_code
         logging_service.logger.critical(
             "Unhandled Exception",
             exc_info=True,
             stack_info=True,
             extra=log_metadata.model_dump(),
         )
-        raise HTTPException(400, "Something went wrong while processing your request.")
+        raise HTTPException(status_code, error_message)
 
 
 def sanitize_filename(filename: str) -> str:

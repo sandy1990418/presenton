@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/hooks/use-toast";
-import { Info, ExternalLink, PlayCircle, Loader2, Check, ChevronsUpDown } from "lucide-react";
+import { Info, ExternalLink, PlayCircle, Loader2, Check, ChevronsUpDown, Edit3 } from "lucide-react";
 import Link from "next/link";
 import {
     Accordion,
@@ -390,6 +390,15 @@ export default function Home() {
                     <p className="text-gray-600 text-lg">
                         Open-source AI presentation generator
                     </p>
+                    <div className="mt-4">
+                        <Link 
+                            href="/editable-ppt"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                            <Edit3 className="w-4 h-4" />
+                            Try Editable PPT Viewer
+                        </Link>
+                    </div>
                 </div>
 
                 {/* Main Configuration Card */}
