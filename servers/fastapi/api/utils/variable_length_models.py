@@ -10,9 +10,14 @@ from ppt_config_generator.models import (
 
 class SlideMarkdownModelWithValidation(SlideMarkdownModel):
     title: str = Field(
-        description="Title of the slide in about 3 to 5 words",
+        description="Compelling slide title that captures attention and conveys key message",
         min_length=10,
-        max_length=50,
+        max_length=100,
+    )
+    body: str = Field(
+        description="Comprehensive slide content in markdown format with substantial insights, examples, and actionable points",
+        min_length=50,
+        max_length=2000,
     )
     
     class Config:
@@ -21,13 +26,27 @@ class SlideMarkdownModelWithValidation(SlideMarkdownModel):
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "Title of the slide in about 3 to 5 words",
+                    "description": "Compelling slide title that captures attention and conveys key message",
                     "minLength": 10,
-                    "maxLength": 50
+                    "maxLength": 100
                 },
                 "body": {
                     "type": "string",
-                    "description": "Content of the slide in markdown format"
+                    "description": "Comprehensive slide content in markdown format with substantial insights, examples, and actionable points",
+                    "minLength": 50,
+                    "maxLength": 2000
+                },
+                "speaker_notes": {
+                    "type": "string",
+                    "description": "Detailed speaker notes with talking points, transitions, and additional context"
+                },
+                "visual_suggestions": {
+                    "type": "string",
+                    "description": "Specific suggestions for charts, images, and visual elements placement"
+                },
+                "estimated_time": {
+                    "type": "integer",
+                    "description": "Estimated presentation time for this slide in minutes"
                 }
             },
             "required": ["title", "body"]
@@ -37,14 +56,30 @@ class SlideMarkdownModelWithValidation(SlideMarkdownModel):
 def get_presentation_markdown_model_with_n_slides(n_slides: int):
     class PresentationMarkdownModelWithNSlides(PresentationMarkdownModel):
         title: str = Field(
-            description="Title of the presentation in about 3 to 8 words",
+            description="Compelling presentation title that captures the core message and value proposition",
             min_length=10,
-            max_length=50,
+            max_length=100,
+        )
+        executive_summary: Optional[str] = Field(
+            description="Brief executive summary highlighting key insights and outcomes",
+            default=""
         )
         notes: Optional[List[str]] = Field(
-            description="Important notes for the presentation styling and formatting",
+            description="Strategic notes for the presentation including key messages and call-to-actions",
             min_length=0,
             max_length=10,
+        )
+        total_estimated_time: Optional[int] = Field(
+            description="Total estimated presentation time in minutes",
+            default=10
+        )
+        target_audience: Optional[str] = Field(
+            description="Primary target audience for this presentation",
+            default="Business professionals"
+        )
+        key_takeaways: Optional[List[str]] = Field(
+            description="Main takeaways and action items from the presentation",
+            default_factory=list
         )
         slides: List[SlideMarkdownModelWithValidation] = Field(
             description="List of slides", min_items=n_slides, max_items=n_slides

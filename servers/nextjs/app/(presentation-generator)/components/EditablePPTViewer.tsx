@@ -26,6 +26,9 @@ interface SlideContent {
   content: string;
   htmlContent?: string;
   chartData?: any;
+  speaker_notes?: string;
+  visual_suggestions?: string;
+  estimated_time?: number;
 }
 
 const EditablePPTViewer: React.FC<EditablePPTViewerProps> = ({
@@ -342,10 +345,19 @@ const EditablePPTViewer: React.FC<EditablePPTViewerProps> = ({
                         <div className="slide-preview">
                           <div className="slide-content-wrapper">
                             <h2 className="text-2xl font-bold mb-4">{slide.title}</h2>
-                            <p className="text-gray-700 mb-6">{slide.content}</p>
                             
+                            {/* 主要內容 */}
+                            <div className="mb-6">
+                              <div
+                                dangerouslySetInnerHTML={{
+                                  __html: slide.htmlContent || generateHTMLFromContent(slide),
+                                }}
+                              />
+                            </div>
+                            
+                            {/* 圖表部分 */}
                             {slide.chartData && (
-                              <div className="chart-section">
+                              <div className="chart-section mb-6">
                                 <div className="flex items-center justify-between mb-4">
                                   <h3 className="text-lg font-semibold">📊 評估結果</h3>
                                   <div className="flex gap-2">
@@ -372,12 +384,29 @@ const EditablePPTViewer: React.FC<EditablePPTViewerProps> = ({
                               </div>
                             )}
                             
-                            {!slide.chartData && (
-                              <div
-                                dangerouslySetInnerHTML={{
-                                  __html: slide.htmlContent || generateHTMLFromContent(slide),
-                                }}
-                              />
+                            {/* 講者備註 */}
+                            {slide.speaker_notes && (
+                              <div className="speaker-notes bg-blue-50 p-4 rounded-lg mb-4">
+                                <h4 className="font-semibold text-blue-800 mb-2">🎤 講者備註</h4>
+                                <p className="text-blue-700 text-sm">{slide.speaker_notes}</p>
+                              </div>
+                            )}
+                            
+                            {/* 視覺建議 */}
+                            {slide.visual_suggestions && (
+                              <div className="visual-suggestions bg-green-50 p-4 rounded-lg mb-4">
+                                <h4 className="font-semibold text-green-800 mb-2">🎨 視覺建議</h4>
+                                <p className="text-green-700 text-sm">{slide.visual_suggestions}</p>
+                              </div>
+                            )}
+                            
+                            {/* 時間估計 */}
+                            {slide.estimated_time && (
+                              <div className="time-estimate text-right">
+                                <span className="text-sm text-gray-500">
+                                  ⏱️ 預估時間: {slide.estimated_time} 分鐘
+                                </span>
+                              </div>
                             )}
                           </div>
                         </div>

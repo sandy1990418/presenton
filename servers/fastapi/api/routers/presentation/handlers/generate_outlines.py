@@ -7,6 +7,7 @@ from api.services.logging import LoggingService
 from api.sql_models import PresentationSqlModel
 from ppt_config_generator.ppt_outlines_generator import generate_ppt_content
 from api.services.database import get_sql_session
+from ppt_config_generator.image_integration_service import image_integration_service
 
 
 class PresentationOutlinesGenerateHandler:
@@ -31,11 +32,22 @@ class PresentationOutlinesGenerateHandler:
                 PresentationSqlModel, self.data.presentation_id
             )
 
+            # 處理圖片整合
+            analyzed_images = []
+            if hasattr(presentation, 'images') and presentation.images:
+                # 分析參考圖片
+                analyzed_images = image_integration_service.analyze_images(presentation.images)
+                logging_service.logger.info(
+                    f"Analyzed {len(analyzed_images)} reference images for presentation",
+                    extra=log_metadata.model_dump(),
+                )
+
             presentation_content = await generate_ppt_content(
                 presentation.prompt,
                 presentation.n_slides,
                 presentation.language,
                 presentation.summary,
+                analyzed_images if analyzed_images else None,
             )
             presentation_content.slides = presentation_content.slides[
                 : presentation.n_slides

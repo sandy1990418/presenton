@@ -41,10 +41,22 @@ class PresentationStructureModel(BaseModel):
 
 class SlideMarkdownModel(BaseModel):
     title: str = Field(
-        description="Title of the slide in about 3 to 5 words",
+        description="Compelling slide title that captures attention and conveys key message",
     )
     body: str = Field(
-        description="Content of the slide in markdown format",
+        description="Comprehensive slide content in markdown format with substantial insights, examples, and actionable points",
+    )
+    speaker_notes: Optional[str] = Field(
+        description="Detailed speaker notes with talking points, transitions, and additional context",
+        default=""
+    )
+    visual_suggestions: Optional[str] = Field(
+        description="Specific suggestions for charts, images, and visual elements placement",
+        default=""
+    )
+    estimated_time: Optional[int] = Field(
+        description="Estimated presentation time for this slide in minutes",
+        default=2
     )
     
     class Config:
@@ -53,11 +65,23 @@ class SlideMarkdownModel(BaseModel):
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "Title of the slide in about 3 to 5 words"
+                    "description": "Compelling slide title that captures attention and conveys key message"
                 },
                 "body": {
                     "type": "string",
-                    "description": "Content of the slide in markdown format"
+                    "description": "Comprehensive slide content in markdown format with substantial insights, examples, and actionable points"
+                },
+                "speaker_notes": {
+                    "type": "string",
+                    "description": "Detailed speaker notes with talking points, transitions, and additional context"
+                },
+                "visual_suggestions": {
+                    "type": "string",
+                    "description": "Specific suggestions for charts, images, and visual elements placement"
+                },
+                "estimated_time": {
+                    "type": "integer",
+                    "description": "Estimated presentation time for this slide in minutes"
                 }
             },
             "required": ["title", "body"]
@@ -66,10 +90,26 @@ class SlideMarkdownModel(BaseModel):
 
 class PresentationMarkdownModel(BaseModel):
     title: str = Field(
-        description="Title of the presentation in about 3 to 8 words",
+        description="Compelling presentation title that captures the core message and value proposition",
     )
-    notes: Optional[List[str]] = Field(description="Notes for the presentation")
-    slides: List[SlideMarkdownModel] = Field(description="List of slides")
+    executive_summary: Optional[str] = Field(
+        description="Brief executive summary highlighting key insights and outcomes",
+        default=""
+    )
+    notes: Optional[List[str]] = Field(description="Strategic notes for the presentation including key messages and call-to-actions")
+    slides: List[SlideMarkdownModel] = Field(description="List of professionally crafted slides with comprehensive content")
+    total_estimated_time: Optional[int] = Field(
+        description="Total estimated presentation time in minutes",
+        default=10
+    )
+    target_audience: Optional[str] = Field(
+        description="Primary target audience for this presentation",
+        default="Business professionals"
+    )
+    key_takeaways: Optional[List[str]] = Field(
+        description="Main takeaways and action items from the presentation",
+        default_factory=list
+    )
     
     class Config:
         json_schema_extra = {
@@ -77,20 +117,39 @@ class PresentationMarkdownModel(BaseModel):
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "Title of the presentation in about 3 to 8 words"
+                    "description": "Compelling presentation title that captures the core message and value proposition"
+                },
+                "executive_summary": {
+                    "type": "string",
+                    "description": "Brief executive summary highlighting key insights and outcomes"
                 },
                 "notes": {
                     "type": "array",
-                    "description": "Notes for the presentation",
+                    "description": "Strategic notes for the presentation including key messages and call-to-actions",
                     "items": {
                         "type": "string"
                     }
                 },
                 "slides": {
                     "type": "array",
-                    "description": "List of slides",
+                    "description": "List of professionally crafted slides with comprehensive content",
                     "items": {
                         "type": "object"
+                    }
+                },
+                "total_estimated_time": {
+                    "type": "integer",
+                    "description": "Total estimated presentation time in minutes"
+                },
+                "target_audience": {
+                    "type": "string",
+                    "description": "Primary target audience for this presentation"
+                },
+                "key_takeaways": {
+                    "type": "array",
+                    "description": "Main takeaways and action items from the presentation",
+                    "items": {
+                        "type": "string"
                     }
                 }
             },
