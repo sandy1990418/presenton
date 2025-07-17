@@ -7,20 +7,28 @@ from api.utils.variable_length_models import (
 from ppt_config_generator.models import PresentationMarkdownModel
 
 
-def get_prompt_template(prompt: str, n_slides: int, language: str, content: str, images: list = None):
+def get_prompt_template(prompt: str, n_slides: int, language: str, content: str, image_processing_result: dict = None):
     from .image_integration_service import image_integration_service
     
     images_info = ""
     image_integration_prompt = ""
     
-    if images:
+    if image_processing_result and image_processing_result.get('image_analyses'):
+        total_images = image_processing_result.get('total_images_analyzed', 0)
+        high_relevance_count = len(image_processing_result.get('high_relevance_images', []))
+        
         images_info = f"""
-        - Reference Images: {len(images)} images provided (including extracted images from documents)
-        - Image Integration: Each relevant image should be referenced in slide notes with specific placement suggestions
+        - Reference Images: {total_images} images analyzed (including PDF extraction)
+        - High Relevance Images: {high_relevance_count} images with relevance score ≥ 7
+        - Intelligent Mapping: AI-powered slide-image assignment completed
         """
         
-        # 生成詳細的圖片整合提示
-        image_integration_prompt = image_integration_service.generate_image_integration_prompts(images)
+        # 生成智能圖片整合提示
+        try:
+            image_integration_prompt = image_integration_service.generate_image_integration_prompts_intelligent(image_processing_result)
+        except Exception as e:
+            print(f"Error generating image integration prompts: {e}")
+            image_integration_prompt = ""
     
     return [
         {
@@ -121,7 +129,7 @@ async def generate_ppt_content(
     n_slides: int,
     language: Optional[str] = None,
     content: Optional[str] = None,
-    images: Optional[list] = None,
+    image_processing_result: Optional[dict] = None,
 ) -> PresentationMarkdownModel:
     from api.utils.model_utils import get_selected_llm_provider
     from api.models import SelectedLLMProvider
@@ -138,7 +146,7 @@ async def generate_ppt_content(
             response = await client.beta.chat.completions.parse(
                 model=model,
                 temperature=0.2,
-                messages=get_prompt_template(prompt, n_slides, language, content, images),
+                messages=get_prompt_template(prompt, n_slides, language, content, image_processing_result),
                 response_format=response_model,
             )
             return response.choices[0].message.parsed
@@ -146,7 +154,7 @@ async def generate_ppt_content(
         # 對於其他提供商，使用 JSON mode
         else:
             # 添加 JSON 格式指令到 prompt
-            messages = get_prompt_template(prompt, n_slides, language, content, images)
+            messages = get_prompt_template(prompt, n_slides, language, content, image_processing_result)
             
             # 修改系統消息以包含 JSON 格式要求
             messages[0]["content"] += f"""
@@ -185,7 +193,7 @@ async def generate_ppt_content(
         response = await client.chat.completions.create(
             model=model,
             temperature=0.2,
-            messages=get_prompt_template(prompt, n_slides, language, content, images),
+            messages=get_prompt_template(prompt, n_slides, language, content, image_processing_result),
         )
         
         # 創建一個基本的響應結構

@@ -150,19 +150,48 @@ async def get_edited_slide_content_model(
 
     content_type_model_type = LLM_CONTENT_TYPE_MAPPING_WITH_VALIDATION[slide_type]
     slide_data = slide.content.to_llm_content().model_dump_json()
-    response = await client.beta.chat.completions.parse(
-        model=model,
-        temperature=0.2,
-        messages=get_prompt_to_edit_slide_content(
-            prompt,
-            slide_data,
-            theme,
-            language,
-        ),
-        response_format=content_type_model_type,
-    )
-    response_data = response.choices[0].message.parsed
-    return response_data
+    
+    try:
+        response = await client.beta.chat.completions.parse(
+            model=model,
+            temperature=0.2,
+            messages=get_prompt_to_edit_slide_content(
+                prompt,
+                slide_data,
+                theme,
+                language,
+            ),
+            response_format=content_type_model_type,
+        )
+        response_data = response.choices[0].message.parsed
+        return response_data
+    
+    except Exception as e:
+        print(f"Error with validation model: {e}")
+        # 回退到非驗證版本的模型
+        from ppt_generator.models.llm_models import LLM_CONTENT_TYPE_MAPPING
+        
+        fallback_model_type = LLM_CONTENT_TYPE_MAPPING[slide_type]
+        
+        try:
+            response = await client.beta.chat.completions.parse(
+                model=model,
+                temperature=0.2,
+                messages=get_prompt_to_edit_slide_content(
+                    prompt,
+                    slide_data,
+                    theme,
+                    language,
+                ),
+                response_format=fallback_model_type,
+            )
+            response_data = response.choices[0].message.parsed
+            print(f"Successfully used fallback model for slide type {slide_type}")
+            return response_data
+        
+        except Exception as fallback_error:
+            print(f"Fallback model also failed: {fallback_error}")
+            raise fallback_error
 
 
 async def get_slide_type_from_prompt(

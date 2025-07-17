@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Mapping, Union
+from typing import List, Mapping, Union, Optional
 from pydantic import BaseModel
 
 from graph_processor.models import GraphModel, LLMGraphModel
@@ -157,14 +157,19 @@ class Type6Content(SlideContentModel):
 
 class Type7Content(SlideContentModel):
     body: List[HeadingModel]
-    icon_queries: List[str]
+    icon_queries: Optional[List[str]] = None
 
     def to_llm_content(self):
         from ppt_generator.models.llm_models import LLMType7Content
 
         llm_body = []
+        icon_queries = self.icon_queries or []
         for i, item in enumerate(self.body):
-            icon_query = self.icon_queries[i] if i < len(self.icon_queries) else ""
+            # 確保總是有 icon_query，即使是空字符串也要傳遞，這樣會返回 LLMHeadingModelWithIconQuery
+            icon_query = icon_queries[i] if i < len(icon_queries) else "default"
+            # 強制使用 icon_query 路徑以確保類型一致性
+            if not icon_query.strip():
+                icon_query = "default"
             llm_body.append(item.to_llm_content(icon_query=icon_query))
         return LLMType7Content(
             title=self.title,
@@ -175,15 +180,20 @@ class Type7Content(SlideContentModel):
 class Type8Content(SlideContentModel):
     description: str
     body: List[HeadingModel]
-    icon_queries: List[str]
+    icon_queries: Optional[List[str]] = None
 
     def to_llm_content(self):
         from ppt_generator.models.llm_models import LLMType8Content
 
         llm_body = []
+        icon_queries = self.icon_queries or []
         for i, item in enumerate(self.body):
-            icon_query = self.icon_queries[i] if i < len(self.icon_queries) else ""
-            llm_body.append(item.to_llm_content(icon_query=icon_query))
+            # Type8 使用 image_prompt 而不是 icon_query，所以使用 image_prompt 參數
+            icon_query = icon_queries[i] if i < len(icon_queries) else "default"
+            # 強制使用 image_prompt 路徑以確保類型一致性
+            if not icon_query.strip():
+                icon_query = "default"
+            llm_body.append(item.to_llm_content(image_prompt=icon_query))
         return LLMType8Content(
             title=self.title,
             description=self.description,

@@ -6,7 +6,7 @@ import os
 from typing import List, Optional, Dict
 from PIL import Image
 import json
-# from .document_image_extractor import document_image_extractor
+from .intelligent_image_processor import intelligent_image_processor
 
 class ImageIntegrationService:
     """處理圖片整合到PPT生成過程中的服務"""
@@ -14,8 +14,25 @@ class ImageIntegrationService:
     def __init__(self):
         self.supported_formats = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
     
+    async def analyze_images_intelligent(self, 
+                                        image_paths: List[str], 
+                                        documents: Optional[List[str]] = None,
+                                        presentation_prompt: str = "",
+                                        slide_titles: Optional[List[str]] = None) -> Dict:
+        """使用智能處理器分析圖片並提取相關信息"""
+        
+        # 使用智能圖片處理器
+        result = await intelligent_image_processor.process_presentation_images(
+            direct_images=image_paths,
+            document_paths=documents or [],
+            presentation_prompt=presentation_prompt,
+            slide_titles=slide_titles or []
+        )
+        
+        return result
+    
     def analyze_images(self, image_paths: List[str], documents: Optional[List[str]] = None) -> List[Dict]:
-        """分析圖片並提取相關信息，包括從文件中自動提取的圖片"""
+        """基本圖片分析方法（fallback版本）"""
         analyzed_images = []
         
         # 處理直接提供的圖片
@@ -49,11 +66,6 @@ class ImageIntegrationService:
             except Exception as e:
                 print(f"Error analyzing image {image_path}: {e}")
                 continue
-        
-        # 從文件中提取圖片 (暫時禁用)
-        # if documents:
-        #     extracted_images = self._extract_images_from_documents(documents)
-        #     analyzed_images.extend(extracted_images)
         
         return analyzed_images
     
@@ -122,57 +134,11 @@ class ImageIntegrationService:
         
         return descriptions.get(content_type, f'圖片 ({filename}) - 可用於支持演示內容')
     
-    def generate_image_integration_prompts(self, analyzed_images: List[Dict]) -> str:
-        """生成圖片整合的提示文本"""
-        if not analyzed_images:
-            return ""
-        
-        # 分別統計直接上傳和從文件提取的圖片
-        direct_images = [img for img in analyzed_images if img.get('source') == 'direct_upload']
-        extracted_images = [img for img in analyzed_images if img.get('source') == 'document_extracted']
-        
-        prompt = f"\n\n**參考圖片分析與整合建議:**\n"
-        prompt += f"共提供 {len(analyzed_images)} 張參考圖片"
-        
-        if direct_images and extracted_images:
-            prompt += f"（其中 {len(direct_images)} 張直接上傳，{len(extracted_images)} 張從文件中提取）"
-        elif extracted_images:
-            prompt += f"（全部從參考文件中自動提取）"
-        
-        prompt += "，請根據以下分析結果將圖片有效整合到演示文稿中：\n\n"
-        
-        # 顯示直接上傳的圖片
-        if direct_images:
-            prompt += "**直接上傳的圖片:**\n"
-            for img in direct_images:
-                prompt += f"• **{img['id']}** ({img['filename']}):\n"
-                prompt += f"  - 類型: {img['content_type']}\n"
-                prompt += f"  - 尺寸: {img['dimensions']} ({img['size_category']})\n"
-                prompt += f"  - 建議放置: {img['suggested_placement']}\n"
-                prompt += f"  - 說明: {img['description']}\n\n"
-        
-        # 顯示從文件提取的圖片
-        if extracted_images:
-            prompt += "**從參考文件中提取的圖片:**\n"
-            for img in extracted_images:
-                prompt += f"• **{img['id']}** ({img['filename']}):\n"
-                prompt += f"  - 來源: {os.path.basename(img.get('source_document', ''))}\n"
-                prompt += f"  - 類型: {img['content_type']}\n"
-                prompt += f"  - 尺寸: {img['dimensions']}\n"
-                if img.get('page_number'):
-                    prompt += f"  - 頁面: 第 {img['page_number']} 頁\n"
-                prompt += f"  - 建議放置: {img['suggested_placement']}\n"
-                prompt += f"  - 說明: {img['description']}\n\n"
-        
-        prompt += "**圖片整合要求:**\n"
-        prompt += "1. 在每張投影片的 visual_suggestions 字段中具體說明要使用哪些圖片\n"
-        prompt += "2. 為每張圖片提供具體的放置位置和說明文字\n"
-        prompt += "3. 確保圖片與投影片內容高度相關\n"
-        prompt += "4. 在 speaker_notes 中包含圖片的講解要點\n"
-        prompt += "5. 特別注意從文件中提取的圖片，這些是用戶參考資料的核心視覺內容\n"
-        prompt += "6. 將提取的圖片作為內容創作的重要參考，確保生成內容與圖片所展示的信息一致\n\n"
-        
-        return prompt
+    def generate_image_integration_prompts_intelligent(self, image_processing_result: Dict) -> str:
+        """使用智能處理器生成圖片整合提示"""
+        return intelligent_image_processor.generate_enhanced_prompt_with_images(
+            "", image_processing_result
+        )
     
     def create_image_references_for_slides(self, analyzed_images: List[Dict], slide_count: int) -> Dict[int, List[Dict]]:
         """為投影片創建圖片引用映射"""
