@@ -13,6 +13,12 @@ class SlideOutlineModelWithValidation(SlideOutlineModel):
         min_length=10,
         max_length=50,
     )
+    body: Optional[str] = Field(
+        default=None,
+        description="Brief description or summary of the slide content",
+        min_length=10,
+        max_length=200,
+    )
 
 
 def get_presentation_outline_model_with_n_slides(n_slides: int):

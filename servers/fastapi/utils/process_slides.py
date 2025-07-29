@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import List, Tuple
 from models.image_prompt import ImagePrompt
 from models.sql.image_asset import ImageAsset
@@ -7,6 +8,26 @@ from services.icon_finder_service import IconFinderService
 from services.image_generation_service import ImageGenerationService
 from utils.asset_directory_utils import get_images_directory
 from utils.dict_utils import get_dict_at_path, get_dict_paths_with_key, set_dict_at_path
+from utils.get_env import get_app_data_directory_env
+
+
+def convert_file_path_to_web_url(file_path: str) -> str:
+    """Convert a local file path to a web-accessible URL."""
+    if file_path.startswith("http"):
+        return file_path
+    
+    # Get the app_data directory
+    app_data_dir = get_app_data_directory_env()
+    
+    # If the path contains app_data, extract the relative path
+    if app_data_dir in file_path:
+        relative_path = os.path.relpath(file_path, app_data_dir)
+        # Convert to forward slashes for URL
+        relative_path = relative_path.replace(os.sep, '/')
+        return f"/app_data/{relative_path}"
+    
+    # Fallback: return as is if it's already a web path
+    return file_path
 
 
 async def process_slide_and_fetch_assets(
@@ -45,9 +66,9 @@ async def process_slide_and_fetch_assets(
         result = results.pop()
         if isinstance(result, ImageAsset):
             return_assets.append(result)
-            image_dict["__image_url__"] = result.path
+            image_dict["__image_url__"] = convert_file_path_to_web_url(result.path)
         else:
-            image_dict["__image_url__"] = result
+            image_dict["__image_url__"] = convert_file_path_to_web_url(result)
         set_dict_at_path(slide.content, image_path, image_dict)
 
     for icon_path in icon_paths:
@@ -154,9 +175,9 @@ async def process_old_and_new_slides_and_fetch_assets(
             fetched_image = new_images[i]
             if isinstance(fetched_image, ImageAsset):
                 new_assets.append(fetched_image)
-                image_url = fetched_image.path
+                image_url = convert_file_path_to_web_url(fetched_image.path)
             else:
-                image_url = fetched_image
+                image_url = convert_file_path_to_web_url(fetched_image)
             new_image_dicts[i]["__image_url__"] = image_url
 
     for i, new_icon in enumerate(new_icons):

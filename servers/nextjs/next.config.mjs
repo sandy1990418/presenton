@@ -50,7 +50,24 @@ const nextConfig = {
       },
     ],
   },
-  
+  rewrites: async () => [
+    {
+      source: "/static/:path*",
+      destination: "/api/static/:path*",
+    },
+    {
+      source: "/app_data/:path*",
+      destination: "/api/app_data/:path*",
+    },
+    {
+      source: "/database/images/:path*",
+      destination: "/app_data/images/:path*",
+    },
+    {
+      source: "/api/v1/ppt/:path*",
+      destination: "http://localhost:8000/api/v1/ppt/:path*",
+    },
+  ],
 };
 
 export default nextConfig;

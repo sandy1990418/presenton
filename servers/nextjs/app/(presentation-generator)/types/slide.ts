@@ -20,6 +20,26 @@ interface SlideContent {
   infographics?: any;
   image_prompts?: string[];
   icon_queries?: Array<{ queries: string[] }>;
+  flowchart?: {
+    nodes: Array<{
+      id: string;
+      type: "rectangle" | "diamond" | "circle" | "rounded";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      text: string;
+      backgroundColor?: string;
+      textColor?: string;
+    }>;
+    connections: Array<{
+      id: string;
+      from_node: string;
+      to_node: string;
+      label?: string;
+      style?: "solid" | "dashed" | "dotted";
+    }>;
+  };
 }
 
 export interface Slide {

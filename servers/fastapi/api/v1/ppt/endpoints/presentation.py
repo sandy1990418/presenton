@@ -211,19 +211,28 @@ async def stream_presentation(
         layout = presentation.get_layout()
         outline = presentation.get_presentation_outline()
 
-        # These tasks will be gathered and awaited after all slides are generated
-        async_assets_generation_tasks = []
+        # Generate all slide content in parallel
+        slide_content_tasks = []
+        for i, slide_layout_index in enumerate(structure.slides):
+            slide_layout = layout.slides[slide_layout_index]
+            slide_content_tasks.append(
+                get_slide_content_from_type_and_outline(slide_layout, outline.slides[i])
+            )
 
-        slides: List[SlideModel] = []
         yield SSEResponse(
             event="response",
             data=json.dumps({"type": "chunk", "chunk": '{ "slides": [ '}),
         ).to_string()
-        for i, slide_layout_index in enumerate(structure.slides):
+
+        # Wait for all slide content to be generated
+        all_slide_contents = await asyncio.gather(*slide_content_tasks)
+
+        # Create slide models with generated content
+        slides: List[SlideModel] = []
+        async_assets_generation_tasks = []
+        
+        for i, (slide_layout_index, slide_content) in enumerate(zip(structure.slides, all_slide_contents)):
             slide_layout = layout.slides[slide_layout_index]
-            slide_content = await get_slide_content_from_type_and_outline(
-                slide_layout, outline.slides[i]
-            )
             slide = SlideModel(
                 presentation=presentation_id,
                 layout_group=layout.name,
@@ -240,9 +249,6 @@ async def stream_presentation(
                 )
             )
 
-            # Give control to the event loop
-            await asyncio.sleep(0)
-
             yield SSEResponse(
                 event="response",
                 data=json.dumps({"type": "chunk", "chunk": slide.model_dump_json()}),
@@ -253,6 +259,7 @@ async def stream_presentation(
             data=json.dumps({"type": "chunk", "chunk": " ] }"}),
         ).to_string()
 
+        # Process all assets in parallel
         generated_assets_lists = await asyncio.gather(*async_assets_generation_tasks)
         generated_assets = []
         for assets_list in generated_assets_lists:
@@ -414,15 +421,23 @@ async def generate_presentation_api(
     icon_finder_service = IconFinderService()
     async_asset_generation_tasks = []
 
-    # 7. Generate slide content and save slides
-    slides: List[SlideModel] = []
-    slide_contents: List[dict] = []
+    # 7. Generate slide content in parallel
+    slide_content_tasks = []
     for i, slide_layout_index in enumerate(presentation_structure.slides):
         slide_layout = layout_model.slides[slide_layout_index]
         print(f"Generating content for slide {i} with layout {slide_layout.id}")
-        slide_content = await get_slide_content_from_type_and_outline(
-            slide_layout, outlines[i]
+        slide_content_tasks.append(
+            get_slide_content_from_type_and_outline(slide_layout, outlines[i])
         )
+
+    # Wait for all slide content to be generated
+    all_slide_contents = await asyncio.gather(*slide_content_tasks)
+
+    # Create slides and prepare asset generation tasks
+    slides: List[SlideModel] = []
+    slide_contents: List[dict] = []
+    for i, (slide_layout_index, slide_content) in enumerate(zip(presentation_structure.slides, all_slide_contents)):
+        slide_layout = layout_model.slides[slide_layout_index]
         slide = SlideModel(
             presentation=presentation_id,
             layout_group=layout_model.name,
@@ -438,6 +453,7 @@ async def generate_presentation_api(
         slides.append(slide)
         slide_contents.append(slide_content)
 
+    # Process all assets in parallel
     generated_assets_lists = await asyncio.gather(*async_asset_generation_tasks)
     generated_assets = []
     for assets_list in generated_assets_lists:

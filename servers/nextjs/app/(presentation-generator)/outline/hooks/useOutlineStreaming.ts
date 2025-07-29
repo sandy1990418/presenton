@@ -17,7 +17,13 @@ export const useOutlineStreaming = (presentationId: string | null) => {
   const [streamState, setStreamState] = useState<StreamState>(DEFAULT_STREAM_STATE);
 
   useEffect(() => {
-    if (!presentationId || outlines.length > 0) return;
+    console.log("useOutlineStreaming effect running:", { presentationId, outlines });
+    if (!presentationId) return;
+    
+    // Check if we have valid outlines (with title/body) or just placeholder data
+    const hasValidOutlines = outlines.length > 0 && outlines.some(outline => outline.title || outline.body);
+    console.log("Has valid outlines:", hasValidOutlines);
+    if (hasValidOutlines) return;
 
     let eventSource: EventSource;
     let accumulatedChunks = "";
@@ -49,12 +55,15 @@ export const useOutlineStreaming = (presentationId: string | null) => {
 
             case "complete":
               try {
+                console.log("Complete event received:", data);
                 const outlinesData: SlideOutline[] = data.presentation.outlines;
+                console.log("Outlines data:", outlinesData);
                 dispatch(setOutlines(outlinesData));
                 setStreamState({ isStreaming: false, isLoading: false });
                 eventSource.close();
               } catch (error) {
-                console.error("Error parsing accumulated chunks:", error);
+                console.error("Error parsing complete event:", error);
+                console.error("Complete event data:", data);
                 toast.error("Failed to parse presentation data");
                 eventSource.close();
               }

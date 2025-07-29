@@ -12,3 +12,6 @@ tmp
 debug
 .fastembed_cache
 my-doc.txt
+.vscode
+.kiro/specs
+database
