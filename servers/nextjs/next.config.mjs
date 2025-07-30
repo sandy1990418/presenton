@@ -64,8 +64,16 @@ const nextConfig = {
       destination: "/app_data/images/:path*",
     },
     {
+      source: "/database/exports/:path*",
+      destination: "/app_data/exports/:path*",
+    },
+    {
       source: "/api/v1/ppt/:path*",
       destination: "http://localhost:8000/api/v1/ppt/:path*",
+    },
+    {
+      source: "/.well-known/:path*",
+      destination: "/api/not-found",
     },
   ],
 };

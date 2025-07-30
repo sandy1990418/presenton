@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import Announcement from "@/components/Announcement";
 import { PptxPresentationModel } from "@/types/pptx_models";
 import HeaderNav from "../../components/HeaderNab";
+import { downloadFile } from "@/utils/exportUtils";
 
 
 const Header = ({
@@ -65,9 +66,9 @@ const Header = ({
         throw new Error("Failed to get presentation PPTX model");
       }
       const pptx_path = await PresentationGenerationApi.exportAsPPTX(pptx_model);
+      console.log('Received PPTX path from API:', pptx_path);
       if (pptx_path) {
-        // window.open(pptx_path, '_self');
-        downloadLink(pptx_path);
+        downloadFile(pptx_path);
       } else {
         throw new Error("No path returned from export");
       }
@@ -102,8 +103,7 @@ const Header = ({
 
       if (response.ok) {
         const { path: pdfPath } = await response.json();
-        // window.open(pdfPath, '_blank');
-        downloadLink(pdfPath);
+        downloadFile(pdfPath);
       } else {
         throw new Error("Failed to export PDF");
       }
@@ -116,18 +116,6 @@ const Header = ({
       });
     } finally {
       setShowLoader(false);
-    }
-  };
-  const downloadLink = (path: string) => {
-    // if we have popup access give direct download if not redirect to the path
-    if (window.opener) {
-      window.open(path, '_blank');
-    } else {
-      const link = document.createElement('a');
-      link.href = path;
-      link.download = path.split('/').pop() || 'download';
-      document.body.appendChild(link);
-      link.click();
     }
   };
 

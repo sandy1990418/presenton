@@ -61,6 +61,9 @@ export class PresentationGenerationApi {
     language: string | null;
   }) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes timeout
+
       const response = await fetch(
         `/api/v1/ppt/presentation/create`,
         {
@@ -73,9 +76,11 @@ export class PresentationGenerationApi {
             language,
           }),
           cache: "no-cache",
+          signal: controller.signal,
         }
       );
       
+      clearTimeout(timeoutId);
       return await ApiResponseHandler.handleResponse(response, "Failed to create presentation");
     } catch (error) {
       console.error("error in presentation creation", error);

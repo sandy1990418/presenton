@@ -75,7 +75,7 @@ async function getBrowserAndPage(id: string): Promise<[Browser, Page]> {
   const page = await browser.newPage();
 
   await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 });
-  await page.goto(`http://localhost/pdf-maker?id=${id}`, {
+  await page.goto(`http://localhost:3000/pdf-maker?id=${id}`, {
     waitUntil: "networkidle0",
     timeout: 180000,
   });
