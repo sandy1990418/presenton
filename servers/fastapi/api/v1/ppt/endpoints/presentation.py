@@ -112,6 +112,7 @@ async def create_presentation(
     n_slides: Annotated[int, Body()],
     language: Annotated[str, Body()],
     file_paths: Annotated[Optional[List[str]], Body()] = None,
+    web_search_enabled: Annotated[bool, Body()] = False,
     sql_session: AsyncSession = Depends(get_async_session),
 ):
     presentation_id = get_random_uuid()
@@ -130,6 +131,7 @@ async def create_presentation(
         n_slides=n_slides,
         language=language,
         summary=summary,
+        web_search_enabled=web_search_enabled,
     )
 
     sql_session.add(presentation)

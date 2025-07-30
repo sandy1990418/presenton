@@ -75,6 +75,10 @@ const nextConfig = {
       source: "/.well-known/:path*",
       destination: "/api/not-found",
     },
+    {
+      source: "/.well-known//appspecific/:path*",
+      destination: "/api/not-found",
+    },    
   ],
 };
 

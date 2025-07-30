@@ -31,7 +31,10 @@ def get_prompt(presentation_layout: PresentationLayoutModel, n_slides: int, data
                 # Layout Selection Guidelines
                 1. **Content-driven choices**: Let the slide's purpose guide layout selection
                 - Opening/closing → Title layouts
-                - Processes/workflows → Visual process layouts  
+                - Processes/workflows/systems → **MERMAID layouts** (use type-mermaid-slide when available)
+                - Organizational structures → **MERMAID layouts** for hierarchy diagrams
+                - Decision trees/logic flows → **MERMAID layouts** for flowcharts
+                - Step-by-step procedures → **MERMAID layouts** for process flows
                 - Comparisons/contrasts → Side-by-side layouts
                 - Data/metrics → Chart/graph layouts
                 - Concepts/ideas → Image + text layouts

@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import {
     DndContext,
     closestCenter,
@@ -16,7 +16,7 @@ import {
 import { OutlineItem } from "./OutlineItem";
 import { Button } from "@/components/ui/button";
 import { SlideOutline } from "@/store/slices/presentationGeneration";
-import { FileText } from "lucide-react";
+import { FileText, Eye, Edit3 } from "lucide-react";
 
 interface OutlineContentProps {
     outlines: SlideOutline[] | null;
@@ -33,6 +33,8 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
     onDragEnd,
     onAddSlide
 }) => {
+    const [viewMode, setViewMode] = useState<'edit' | 'markdown'>('edit');
+    
     const sensors = useSensors(
         useSensor(PointerSensor),
         useSensor(KeyboardSensor, {
@@ -40,19 +42,81 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
         })
     );
 
+    const generateMarkdownPreview = (outlines: SlideOutline[]) => {
+        if (!outlines || outlines.length === 0) return "";
+        
+        let markdown = "# Presentation Architecture\n\n";
+        markdown += `📊 **Total Slides:** ${outlines.length}\n\n`;
+        markdown += "## Slide Structure\n\n";
+        
+        outlines.forEach((outline, index) => {
+            const slideNumber = index + 1;
+            const title = outline.title || `Slide ${slideNumber}`;
+            const body = outline.body || "No content";
+            
+            // Detect if it's a mermaid slide
+            const isMermaidSlide = body.toLowerCase().includes("mermaid") || 
+                                   body.toLowerCase().includes("diagram") ||
+                                   body.toLowerCase().includes("flowchart") ||
+                                   body.toLowerCase().includes("graph");
+            
+            markdown += `### ${slideNumber}. ${title}\n`;
+            if (isMermaidSlide) {
+                markdown += "🔄 **Type:** Mermaid Diagram\n";
+            } else {
+                markdown += "📝 **Type:** Content Slide\n";
+            }
+            
+            // Truncate long content for preview
+            const truncatedBody = body.length > 100 ? body.substring(0, 100) + "..." : body;
+            markdown += `**Content:** ${truncatedBody}\n\n`;
+        });
+        
+        return markdown;
+    };
+
     return (
         <div className="space-y-6 font-instrument_sans">
-            {/* <div className="flex items-center justify-between">
+            {/* Header with view toggle */}
+            <div className="flex items-center justify-between">
                 <h5 className="text-lg font-medium">
                     Presentation Outline
                 </h5>
-                {isStreaming && (
-                    <div className="flex items-center text-sm text-blue-600">
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                        Generating outlines...
-                    </div>
-                )}
-            </div> */}
+                <div className="flex items-center gap-2">
+                    {isStreaming && (
+                        <div className="flex items-center text-sm text-blue-600">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                            Generating outlines...
+                        </div>
+                    )}
+                    {outlines && outlines.length > 0 && !isLoading && (
+                        <div className="flex bg-gray-100 rounded-lg p-1">
+                            <button
+                                onClick={() => setViewMode('edit')}
+                                className={`flex items-center gap-1 px-3 py-1 rounded-md text-sm transition-colors ${
+                                    viewMode === 'edit' 
+                                        ? 'bg-white text-blue-600 shadow-sm' 
+                                        : 'text-gray-600 hover:text-gray-800'
+                                }`}
+                            >
+                                <Edit3 className="w-4 h-4" />
+                                Edit
+                            </button>
+                            <button
+                                onClick={() => setViewMode('markdown')}
+                                className={`flex items-center gap-1 px-3 py-1 rounded-md text-sm transition-colors ${
+                                    viewMode === 'markdown' 
+                                        ? 'bg-white text-blue-600 shadow-sm' 
+                                        : 'text-gray-600 hover:text-gray-800'
+                                }`}
+                            >
+                                <Eye className="w-4 h-4" />
+                                Preview
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
             {/* Skeleton loading state */}
             {isLoading && (
                 <div className="space-y-4">
@@ -78,34 +142,65 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
             {/* Outlines content */}
             {outlines && outlines.length > 0 && (
                 <div>
-                    <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={onDragEnd}
-                    >
-                        <SortableContext
-                            items={outlines?.map((item, index) => ({ id: item.title || `slide-${index}` })) || []}
-                            strategy={verticalListSortingStrategy}
-                        >
-                            {outlines?.map((item, index) => (
-                                <OutlineItem
-                                    key={item.title || `slide-${index}`}
-                                    index={index + 1}
-                                    slideOutline={item}
-                                    isStreaming={isStreaming}
-                                />
-                            ))}
-                        </SortableContext>
-                    </DndContext>
+                    {viewMode === 'edit' ? (
+                        <>
+                            <DndContext
+                                sensors={sensors}
+                                collisionDetection={closestCenter}
+                                onDragEnd={onDragEnd}
+                            >
+                                <SortableContext
+                                    items={outlines?.map((item, index) => ({ id: item.title || `slide-${index}` })) || []}
+                                    strategy={verticalListSortingStrategy}
+                                >
+                                    {outlines?.map((item, index) => (
+                                        <OutlineItem
+                                            key={item.title || `slide-${index}`}
+                                            index={index + 1}
+                                            slideOutline={item}
+                                            isStreaming={isStreaming}
+                                        />
+                                    ))}
+                                </SortableContext>
+                            </DndContext>
 
-                    <Button
-                        variant="outline"
-                        onClick={onAddSlide}
-                        disabled={isLoading || isStreaming}
-                        className="w-full my-4 text-blue-600 border-blue-200"
-                    >
-                        + Add Slide
-                    </Button>
+                            <Button
+                                variant="outline"
+                                onClick={onAddSlide}
+                                disabled={isLoading || isStreaming}
+                                className="w-full my-4 text-blue-600 border-blue-200"
+                            >
+                                + Add Slide
+                            </Button>
+                        </>
+                    ) : (
+                        /* Markdown Preview Mode */
+                        <div className="bg-white rounded-lg border p-6">
+                            <div className="prose prose-sm max-w-none">
+                                <div 
+                                    className="markdown-content"
+                                    dangerouslySetInnerHTML={{ 
+                                        __html: generateMarkdownPreview(outlines)
+                                            .replace(/\n/g, '<br/>')
+                                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                            .replace(/^### (.*?)$/gm, '<h3 class="text-lg font-semibold text-gray-800 mt-4 mb-2">$1</h3>')
+                                            .replace(/^## (.*?)$/gm, '<h2 class="text-xl font-bold text-gray-900 mt-6 mb-3">$1</h2>')
+                                            .replace(/^# (.*?)$/gm, '<h1 class="text-2xl font-bold text-blue-600 mb-4">$1</h1>')
+                                    }}
+                                />
+                            </div>
+                            <div className="mt-6 pt-4 border-t">
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setViewMode('edit')}
+                                    className="text-blue-600 border-blue-200"
+                                >
+                                    <Edit3 className="w-4 h-4 mr-2" />
+                                    Switch to Edit Mode
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 

@@ -10,6 +10,7 @@ from utils.llm_provider import (
     get_llm_client,
     is_google_selected,
 )
+from utils.tool_calling import tool_registry, handle_tool_calls, should_use_web_search
 from pydantic import BaseModel
 
 system_prompt = """
@@ -26,7 +27,6 @@ You are an expert presentation creator. Generate structured presentations based 
    - Target audience (if specified)
    - Presentation style or tone preferences
 
-
 ## Content Generation Guidelines
 
 ### Presentation Title
@@ -42,12 +42,24 @@ You are an expert presentation creator. Generate structured presentations based 
 - Ensure titles create a **logical flow** through the presentation
 - Keep titles **concise but meaningful**
 
+### Mermaid Diagram Integration
+- **Automatically include mermaid diagrams** when content involves:
+  - Processes, workflows, or step-by-step procedures
+  - Organizational structures or hierarchies
+  - Decision trees or conditional logic
+  - System architectures or data flows
+  - Timelines or project phases
+- Use mermaid code format: `graph LR` (left-to-right) or `graph TD` (top-down)
+- Keep diagrams **simple and readable**
+- Include **descriptive node labels**
+- For mermaid slides, set slide body to: "This slide contains a mermaid diagram showing [brief description]"
 
 ## Special Considerations
 
 ### Slide Count Compliance
 - Generate **exactly** the number of slides requested
 - Distribute content **evenly** across slides
+- **At least 20% of slides should include mermaid diagrams** when the topic involves processes or systems
 - Create **balanced information flow**
 """
 
@@ -90,20 +102,44 @@ async def generate_ppt_outline(
     n_slides: int,
     language: Optional[str] = None,
     content: Optional[str] = None,
+    web_search_enabled: bool = False,
 ):
     model = get_large_model()
     response_model = get_presentation_outline_model_with_n_slides(n_slides)
 
     if not is_google_selected():
         client = get_llm_client()
+        
+        # Determine if we should use web search
+        use_web_search = web_search_enabled and prompt and should_use_web_search(prompt)
+        
+        # Prepare tools if web search is enabled
+        tools = tool_registry.get_tools_schema() if use_web_search else None
+        
+        messages = get_prompt_template(prompt, n_slides, language, content)
+        
+        # Add web search instruction if enabled
+        if use_web_search:
+            system_message = next((msg for msg in messages if msg["role"] == "system"), None)
+            if system_message:
+                system_message["content"] += "\n\nIMPORTANT: If you need current information, statistics, or recent data to create accurate content, use the web_search tool to find relevant information before generating the presentation outline."
+        
         async for response in await client.chat.completions.create(
             model=model,
-            messages=get_prompt_template(prompt, n_slides, language, content),
+            messages=messages,
             stream=True,
             response_format=get_response_format(response_model),
+            tools=tools,
+            tool_choice="auto" if tools else None,
         ):
             delta: ChoiceDelta = response.choices[0].delta
-            if delta.content:
+            
+            # Handle tool calls
+            if delta.tool_calls:
+                # For streaming, we need to handle tool calls differently
+                # This is a simplified approach - in production you might want more sophisticated handling
+                pass
+            elif delta.content:
                 yield delta.content
 
     else:

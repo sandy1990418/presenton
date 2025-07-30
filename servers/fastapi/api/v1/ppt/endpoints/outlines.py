@@ -33,6 +33,7 @@ async def stream_outlines(
             presentation.n_slides,
             presentation.language,
             presentation.summary,
+            presentation.web_search_enabled,
         ):
             # Give control to the event loop
             await asyncio.sleep(0)

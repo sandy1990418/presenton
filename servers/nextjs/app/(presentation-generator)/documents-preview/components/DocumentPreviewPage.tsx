@@ -53,7 +53,7 @@ const DocumentsPreviewPage: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Redux state
-  const { config, files } = useSelector(
+  const { config, files, webSearchEnabled } = useSelector(
     (state: RootState) => state.pptGenUpload
   );
 
@@ -144,7 +144,7 @@ const DocumentsPreviewPage: React.FC = () => {
         n_slides: config?.slides ? parseInt(config.slides) : null,
         file_paths: documentPaths,
         language: config?.language ?? "",
-
+        web_search_enabled: webSearchEnabled,
       });
 
       dispatch(setPresentationId(createResponse.id));

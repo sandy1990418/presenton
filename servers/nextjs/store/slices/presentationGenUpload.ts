@@ -3,14 +3,14 @@ import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
 interface PresentationGenUploadState {
   config: PresentationConfig | null;
-  
   files: any;
-
+  webSearchEnabled: boolean;
 }
 
 const initialState: PresentationGenUploadState = {
   config: null,
   files: [],
+  webSearchEnabled: false,
 };
 
 export const presentationGenUploadSlice = createSlice({
@@ -22,8 +22,9 @@ export const presentationGenUploadSlice = createSlice({
       action: PayloadAction<Partial<PresentationGenUploadState>>
     ) => {
       const payload = action.payload;
-      state.config = payload.config!;
-      state.files = payload.files!;
+      if (payload.config !== undefined) state.config = payload.config;
+      if (payload.files !== undefined) state.files = payload.files;
+      if (payload.webSearchEnabled !== undefined) state.webSearchEnabled = payload.webSearchEnabled;
     },
    
   },

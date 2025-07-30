@@ -25,6 +25,7 @@ import { PresentationGenerationApi } from "../../services/api/presentation-gener
 import { OverlayLoader } from "@/components/ui/overlay-loader";
 import Wrapper from "@/components/Wrapper";
 import { setPptGenUploadState } from "@/store/slices/presentationGenUpload";
+import WebSearchToggle from "@/components/WebSearchToggle";
 
 // Types for loading state
 interface LoadingState {
@@ -46,6 +47,7 @@ const UploadPage = () => {
     language: LanguageType.English,
     prompt: "",
   });
+  const [webSearchEnabled, setWebSearchEnabled] = useState<boolean>(false);
 
   const [loadingState, setLoadingState] = useState<LoadingState>({
     isLoading: false,
@@ -130,6 +132,7 @@ const UploadPage = () => {
     dispatch(setPptGenUploadState({
       config,
       files: responses,
+      webSearchEnabled,
     }));
     router.push("/documents-preview");
   };
@@ -151,6 +154,7 @@ const UploadPage = () => {
       n_slides: config?.slides ? parseInt(config.slides) : null,
       file_paths: [],
       language: config?.language ?? "",
+      web_search_enabled: webSearchEnabled,
     });
 
     dispatch(setPresentationId(createResponse.id));
@@ -188,6 +192,15 @@ const UploadPage = () => {
         <ConfigurationSelects
           config={config}
           onConfigChange={handleConfigChange}
+        />
+      </div>
+
+      {/* Web Search Toggle */}
+      <div className="flex justify-center py-4">
+        <WebSearchToggle
+          enabled={webSearchEnabled}
+          onChange={setWebSearchEnabled}
+          className="bg-white rounded-lg border p-4 shadow-sm"
         />
       </div>
 

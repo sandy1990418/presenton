@@ -54,11 +54,13 @@ export class PresentationGenerationApi {
     n_slides,
     file_paths,
     language,
+    web_search_enabled,
   }: {
     prompt: string;
     n_slides: number | null;
     file_paths?: string[];
     language: string | null;
+    web_search_enabled?: boolean;
   }) {
     try {
       const controller = new AbortController();
@@ -74,6 +76,7 @@ export class PresentationGenerationApi {
             n_slides,
             file_paths,
             language,
+            web_search_enabled: web_search_enabled || false,
           }),
           cache: "no-cache",
           signal: controller.signal,
