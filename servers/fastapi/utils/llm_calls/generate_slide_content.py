@@ -17,6 +17,7 @@ system_prompt = """
     # Steps
     1. Analyze the outline and title.
     2. Generate structured slide based on the outline and title.
+    3. For Mermaid diagrams, ensure proper syntax and node connections.
 
     # Notes
     - Slide body should not use words like "This slide", "This presentation".
@@ -25,6 +26,12 @@ system_prompt = """
     - Provide query to search icon on "__icon_query__" property.
     - Do not use markdown formatting in slide body.
     - **Strictly follow the max and min character limit for every property in the slide.**
+    - **For Mermaid diagrams**: 
+      - Use proper node syntax: A[Text], B{Decision}, C((Circle))
+      - Ensure valid connections: -->, ---|, ==>, -.->
+      - Keep node labels concise and escape special characters
+      - Test syntax: graph LR/TD, flowchart, sequenceDiagram, etc.
+    - **Avoid duplicate content**: Each slide should have unique information and perspective.
 """
 
 

@@ -43,8 +43,12 @@ from utils.llm_calls.generate_slide_content import (
 from utils.process_slides import process_slide_and_fetch_assets
 from utils.randomizers import get_random_uuid
 from utils.validators import validate_files
+from typing import Set
 
 PRESENTATION_ROUTER = APIRouter(prefix="/presentation", tags=["Presentation"])
+
+# Track active streaming requests to prevent duplicates
+_active_streams: Set[str] = set()
 
 
 @PRESENTATION_ROUTER.get("", response_model=PresentationWithSlides)
@@ -191,6 +195,17 @@ async def prepare_presentation(
 async def stream_presentation(
     presentation_id: str, sql_session: AsyncSession = Depends(get_async_session)
 ):
+    print(f"🔵 Stream request for presentation {presentation_id}")
+    print(f"📊 Currently active streams: {_active_streams}")
+    
+    # Check if stream is already active for this presentation
+    if presentation_id in _active_streams:
+        print(f"⚠️ Rejecting duplicate stream request for {presentation_id}")
+        raise HTTPException(
+            status_code=409, 
+            detail=f"Stream already active for presentation {presentation_id}"
+        )
+    
     presentation = await sql_session.get(PresentationModel, presentation_id)
     if not presentation:
         raise HTTPException(status_code=404, detail="Presentation not found")
@@ -209,78 +224,120 @@ async def stream_presentation(
     icon_finder_service = IconFinderService()
 
     async def inner():
-        structure = presentation.get_structure()
-        layout = presentation.get_layout()
-        outline = presentation.get_presentation_outline()
+        try:
+            # Mark stream as active
+            _active_streams.add(presentation_id)
+            
+            structure = presentation.get_structure()
+            layout = presentation.get_layout()
+            outline = presentation.get_presentation_outline()
 
-        # Generate all slide content in parallel
-        slide_content_tasks = []
-        for i, slide_layout_index in enumerate(structure.slides):
-            slide_layout = layout.slides[slide_layout_index]
-            slide_content_tasks.append(
-                get_slide_content_from_type_and_outline(slide_layout, outline.slides[i])
-            )
-
-        yield SSEResponse(
-            event="response",
-            data=json.dumps({"type": "chunk", "chunk": '{ "slides": [ '}),
-        ).to_string()
-
-        # Wait for all slide content to be generated
-        all_slide_contents = await asyncio.gather(*slide_content_tasks)
-
-        # Create slide models with generated content
-        slides: List[SlideModel] = []
-        async_assets_generation_tasks = []
-        
-        for i, (slide_layout_index, slide_content) in enumerate(zip(structure.slides, all_slide_contents)):
-            slide_layout = layout.slides[slide_layout_index]
-            slide = SlideModel(
-                presentation=presentation_id,
-                layout_group=layout.name,
-                layout=slide_layout.id,
-                index=i,
-                content=slide_content,
-            )
-            slides.append(slide)
-
-            # This will mutate slide
-            async_assets_generation_tasks.append(
-                process_slide_and_fetch_assets(
-                    image_generation_service, icon_finder_service, slide
+            # Generate all slide content in parallel
+            slide_content_tasks = []
+            for i, slide_layout_index in enumerate(structure.slides):
+                slide_layout = layout.slides[slide_layout_index]
+                slide_content_tasks.append(
+                    get_slide_content_from_type_and_outline(slide_layout, outline.slides[i])
                 )
-            )
 
             yield SSEResponse(
                 event="response",
-                data=json.dumps({"type": "chunk", "chunk": slide.model_dump_json()}),
+                data=json.dumps({"type": "status", "status": f"Generating content for {len(structure.slides)} slides..."}),
+            ).to_string()
+            
+            yield SSEResponse(
+                event="response",
+                data=json.dumps({"type": "chunk", "chunk": '{ "slides": [ '}),
             ).to_string()
 
-        yield SSEResponse(
-            event="response",
-            data=json.dumps({"type": "chunk", "chunk": " ] }"}),
-        ).to_string()
+            # Wait for all slide content to be generated with progress tracking
+            total_slides = len(slide_content_tasks)
+            all_slide_contents = await asyncio.gather(*slide_content_tasks)
+            
+            yield SSEResponse(
+                event="response",
+                data=json.dumps({"type": "status", "status": f"✅ Generated content for {total_slides} slides, now processing assets..."}),
+            ).to_string()
 
-        # Process all assets in parallel
-        generated_assets_lists = await asyncio.gather(*async_assets_generation_tasks)
-        generated_assets = []
-        for assets_list in generated_assets_lists:
-            generated_assets.extend(assets_list)
+            # Create slide models with generated content and validate for duplicates
+            slides: List[SlideModel] = []
+            async_assets_generation_tasks = []
+            seen_content_hashes = set()
+            
+            for i, (slide_layout_index, slide_content) in enumerate(zip(structure.slides, all_slide_contents)):
+                slide_layout = layout.slides[slide_layout_index]
+                
+                # Create a simple hash of the slide content to detect duplicates
+                content_str = json.dumps(slide_content, sort_keys=True) if slide_content else ""
+                content_hash = hash(content_str)
+                
+                # If duplicate content detected, add variation
+                if content_hash in seen_content_hashes and slide_content:
+                    print(f"⚠️ Duplicate content detected for slide {i}, adding variation")
+                    if isinstance(slide_content, dict) and "title" in slide_content:
+                        slide_content["title"] = f"{slide_content['title']} (Part {i+1})"
+                        content_hash = hash(json.dumps(slide_content, sort_keys=True))
+                
+                seen_content_hashes.add(content_hash)
+                
+                slide = SlideModel(
+                    presentation=presentation_id,
+                    layout_group=layout.name,
+                    layout=slide_layout.id,
+                    index=i,
+                    content=slide_content,
+                )
+                slides.append(slide)
 
-        sql_session.add(presentation)
-        sql_session.add_all(slides)
-        sql_session.add_all(generated_assets)
-        await sql_session.commit()
+                # This will mutate slide
+                async_assets_generation_tasks.append(
+                    process_slide_and_fetch_assets(
+                        image_generation_service, icon_finder_service, slide
+                    )
+                )
 
-        response = PresentationWithSlides(
-            **presentation.model_dump(),
-            slides=slides,
-        )
+                yield SSEResponse(
+                    event="response",
+                    data=json.dumps({"type": "chunk", "chunk": slide.model_dump_json()}),
+                ).to_string()
 
-        yield SSECompleteResponse(
-            key="presentation",
-            value=response.model_dump(mode="json"),
-        ).to_string()
+            yield SSEResponse(
+                event="response",
+                data=json.dumps({"type": "chunk", "chunk": " ] }"}),
+            ).to_string()
+
+            # Process all assets in parallel
+            generated_assets_lists = await asyncio.gather(*async_assets_generation_tasks)
+            generated_assets = []
+            for assets_list in generated_assets_lists:
+                generated_assets.extend(assets_list)
+
+            sql_session.add(presentation)
+            sql_session.add_all(slides)
+            sql_session.add_all(generated_assets)
+            await sql_session.commit()
+
+            response = PresentationWithSlides(
+                **presentation.model_dump(),
+                slides=slides,
+            )
+
+            yield SSECompleteResponse(
+                key="presentation",
+                value=response.model_dump(mode="json"),
+            ).to_string()
+            
+        except Exception as e:
+            print(f"❌ Error in streaming: {e}")
+            yield SSEResponse(
+                event="response",
+                data=json.dumps({"type": "error", "error": f"Stream error: {str(e)}"}),
+            ).to_string()
+        finally:
+            # Always remove from active streams
+            print(f"🟢 Completing stream for presentation {presentation_id}")
+            _active_streams.discard(presentation_id)
+            print(f"📊 Active streams after cleanup: {_active_streams}")
 
     return StreamingResponse(inner(), media_type="text/event-stream")
 

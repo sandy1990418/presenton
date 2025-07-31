@@ -4,6 +4,14 @@ import { clearPresentationData, setPresentationData, setStreaming } from "@/stor
 import { jsonrepair } from "jsonrepair";
 import { RootState } from "@/store/store";
 
+// Global state to prevent multiple streams across all components
+const globalStreamState = {
+  activeStreams: new Set<string>(),
+  isStreaming: (presentationId: string) => globalStreamState.activeStreams.has(presentationId),
+  startStream: (presentationId: string) => globalStreamState.activeStreams.add(presentationId),
+  endStream: (presentationId: string) => globalStreamState.activeStreams.delete(presentationId),
+};
+
 export const usePresentationStreaming = (
   presentationId: string,
   stream: string | null,
@@ -17,6 +25,8 @@ export const usePresentationStreaming = (
   const previousSlidesLength = useRef(0);
   const eventSourceRef = useRef<EventSource | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const streamingRef = useRef<boolean>(false); // Prevent concurrent streams
+  const lastStreamedPresentationRef = useRef<string | null>(null); // Track last streamed presentation
 
   useEffect(() => {
     let accumulatedChunks = "";
@@ -32,10 +42,34 @@ export const usePresentationStreaming = (
         timeoutRef.current = null;
       }
       accumulatedChunks = "";
+      streamingRef.current = false; // Reset streaming flag
+      globalStreamState.endStream(presentationId); // Remove from global state
     };
 
     const initializeStream = async () => {
+      // Global check for active streams
+      if (globalStreamState.isStreaming(presentationId)) {
+        console.warn(`🚫 Global state: Stream already active for presentation ${presentationId}`);
+        return;
+      }
+      
+      // Prevent concurrent streaming requests
+      if (streamingRef.current) {
+        console.warn("🚫 Local state: Stream already in progress, ignoring duplicate request");
+        return;
+      }
+      
+      // Prevent re-streaming the same presentation
+      if (lastStreamedPresentationRef.current === presentationId) {
+        console.warn(`🚫 Cache: Presentation ${presentationId} already streamed, ignoring duplicate request`);
+        return;
+      }
+      
+      console.log(`✅ Starting stream for presentation ${presentationId}`);
       cleanup(); // Ensure clean state
+      streamingRef.current = true;
+      lastStreamedPresentationRef.current = presentationId;
+      globalStreamState.startStream(presentationId);
       
       dispatch(setStreaming(true));
       dispatch(clearPresentationData());
@@ -58,6 +92,19 @@ export const usePresentationStreaming = (
           const data = JSON.parse(event.data);
 
           switch (data.type) {
+            case "status":
+              // Handle status messages for better user feedback
+              console.log("📊 Stream status:", data.status);
+              break;
+              
+            case "error":
+              console.error("❌ Stream error:", data.error);
+              cleanup();
+              setError(true);
+              setLoading(false);
+              dispatch(setStreaming(false));
+              break;
+              
             case "chunk":
               accumulatedChunks += data.chunk;
               
@@ -155,5 +202,5 @@ export const usePresentationStreaming = (
 
     // Cleanup function
     return cleanup;
-  }, [presentationId, stream, dispatch, setLoading, setError, fetchUserSlides, presentationData]);
+  }, [presentationId, stream]); // Remove problematic dependencies that cause re-renders
 }; 

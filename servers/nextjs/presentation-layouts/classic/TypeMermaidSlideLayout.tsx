@@ -18,7 +18,7 @@ const typeMermaidSlideSchema = z.object({
     B -->|No| D[Fix it]
     D --> B
     C --> E[End]`).meta({
-        description: "Mermaid diagram code, and it must be a graph LR",
+        description: "Mermaid diagram code. Supports all Mermaid syntax: graph LR/TD/TB, flowchart, sequenceDiagram, classDiagram, etc. Ensure proper syntax and node connections.",
     }),
     theme: z.enum(['default', 'dark', 'forest', 'neutral']).default('default').meta({
         description: "Mermaid theme to use",
@@ -76,11 +76,20 @@ const TypeMermaidSlideLayout: React.FC<TypeMermaidSlideLayoutProps> = ({ data: s
             } catch (error) {
                 console.error('Error loading or rendering mermaid:', error);
                 if (mermaidRef.current) {
+                    // Try to extract the error message for better debugging
+                    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('Mermaid code that failed:', mermaidCode);
+                    
                     mermaidRef.current.innerHTML = `
-                        <div class="flex items-center justify-center h-full text-red-500">
-                            <div class="text-center">
-                                <p class="text-lg font-semibold">Error rendering diagram</p>
-                                <p class="text-sm mt-2">Please check your Mermaid syntax</p>
+                        <div class="flex items-center justify-center h-full text-red-500 bg-red-50 rounded-lg border border-red-200">
+                            <div class="text-center p-6">
+                                <div class="text-2xl mb-2">⚠️</div>
+                                <p class="text-lg font-semibold mb-2">Mermaid Diagram Error</p>
+                                <p class="text-sm text-gray-600 mb-3">Failed to render diagram: ${errorMessage}</p>
+                                <details class="text-xs text-left">
+                                    <summary class="cursor-pointer font-medium">Show Diagram Code</summary>
+                                    <pre class="mt-2 p-2 bg-gray-100 rounded text-gray-800 overflow-auto">${mermaidCode || 'No code provided'}</pre>
+                                </details>
                             </div>
                         </div>
                     `;

@@ -28,6 +28,7 @@ import { getIconFromFile } from "../../utils/others";
 import { ChevronRight, PanelRightOpen, X } from "lucide-react";
 import ToolTip from "@/components/ToolTip";
 import Header from "@/app/dashboard/components/Header";
+import ImageExtractionProcessor from "@/components/ImageExtractionProcessor";
 
 // Types
 interface LoadingState {
@@ -68,6 +69,10 @@ const DocumentsPreviewPage: React.FC = () => {
     duration: 10,
     progress: false,
   });
+  
+  // Image extraction state
+  const [showImageExtraction, setShowImageExtraction] = useState(false);
+  const [extractedImageMatches, setExtractedImageMatches] = useState<any[]>([]);
 
   // Memoized computed values
   const fileItems: FileItem[] = useMemo(() => {
@@ -269,6 +274,39 @@ const DocumentsPreviewPage: React.FC = () => {
 
         <div className="bg-white w-full mx-2 sm:mx-4 h-[calc(100vh-100px)] custom_scrollbar rounded-md overflow-y-auto py-6 pl-6">
           {renderDocumentContent()}
+          
+          {/* Image extraction toggle and section */}
+          <div className="mt-6 border-t pt-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Smart Image Integration</h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowImageExtraction(!showImageExtraction)}
+                className="text-sm"
+              >
+                {showImageExtraction ? 'Hide' : 'Extract Images from Documents'}
+              </Button>
+            </div>
+            
+            {showImageExtraction && (
+              <ImageExtractionProcessor
+                files={files ? files.flat().map((item: any) => {
+                  // Convert file items back to File objects (simplified approach)
+                  // In a real implementation, you'd want to store the original files
+                  return new File([], item.name, { type: 'application/octet-stream' });
+                }) : []}
+                presentationId={null} // Will be set when presentation is created
+                onImagesExtracted={(matches) => {
+                  setExtractedImageMatches(matches);
+                  console.log('Images extracted and matched:', matches);
+                }}
+                onExtractionComplete={() => {
+                  console.log('Image extraction completed');
+                }}
+              />
+            )}
+          </div>
         </div>
 
         <div className="fixed bottom-5 right-5">

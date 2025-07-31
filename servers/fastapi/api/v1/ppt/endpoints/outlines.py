@@ -45,37 +45,70 @@ async def stream_outlines(
             presentation_content_text += chunk
 
         try:
-            presentation_content_json = json.loads(presentation_content_text)
+            # Clean and validate the accumulated JSON
+            cleaned_content = presentation_content_text.strip()
+            if not cleaned_content:
+                raise ValueError("Empty content received")
+                
+            presentation_content_json = json.loads(cleaned_content)
             print(f"PARSED JSON: {presentation_content_json}")
             
+            # Validate required fields
+            if "slides" not in presentation_content_json:
+                raise ValueError("Missing 'slides' field in response")
+                
             presentation_content = PresentationOutlineModel(**presentation_content_json)
-            presentation_content.slides = presentation_content.slides[
-                : presentation.n_slides
-            ]
+            
+            # Ensure we don't exceed requested slide count and remove duplicates
+            unique_slides = []
+            seen_titles = set()
+            for slide in presentation_content.slides[:presentation.n_slides]:
+                if slide.title not in seen_titles:
+                    unique_slides.append(slide)
+                    seen_titles.add(slide.title)
+                else:
+                    print(f"⚠️ Duplicate slide title detected and removed: {slide.title}")
 
-            presentation.title = presentation_content.title
-            presentation.outlines = [
-                each.model_dump() for each in presentation_content.slides
-            ]
-            presentation.notes = presentation_content.notes
+            presentation.title = presentation_content.title or f"Presentation - {presentation.prompt[:50]}"
+            presentation.outlines = [slide.model_dump() for slide in unique_slides]
+            presentation.notes = getattr(presentation_content, 'notes', None)
             
             # Success! Outlines were parsed and set
-            print(f"✅ Successfully set {len(presentation.outlines)} outlines")
+            print(f"✅ Successfully set {len(presentation.outlines)} unique outlines (removed {len(presentation_content.slides) - len(unique_slides)} duplicates)")
             
-        except (json.JSONDecodeError, Exception) as e:
+        except (json.JSONDecodeError, ValueError) as e:
             # If parsing fails, log the error but don't crash the endpoint
-            print(f"PARSING FAILED: {e}")
-            print(f"CONTENT: {presentation_content_text}")
+            print(f"⚠️ PARSING FAILED: {e}")
+            print(f"CONTENT LENGTH: {len(presentation_content_text)}")
+            print(f"CONTENT PREVIEW: {presentation_content_text[:500]}...")
             
-            # Keep the presentation title updated if available, but don't fail
-            if presentation_content_text and "title" in presentation_content_text:
+            # Try to extract partial information
+            if presentation_content_text:
                 try:
-                    partial_json = json.loads(presentation_content_text + "}")
+                    # Try to repair incomplete JSON
+                    from jsonrepair import jsonrepair
+                    repaired_json = jsonrepair(presentation_content_text)
+                    partial_json = json.loads(repaired_json)
+                    
                     if "title" in partial_json:
                         presentation.title = partial_json["title"]
-                        print(f"EXTRACTED TITLE: {presentation.title}")
-                except:
-                    pass
+                        print(f"✅ EXTRACTED TITLE: {presentation.title}")
+                    
+                    if "slides" in partial_json and isinstance(partial_json["slides"], list):
+                        # Create fallback slides from partial data
+                        presentation.outlines = []
+                        for slide_data in partial_json["slides"][:presentation.n_slides]:
+                            if isinstance(slide_data, dict) and "title" in slide_data:
+                                presentation.outlines.append(slide_data)
+                        print(f"✅ EXTRACTED {len(presentation.outlines)} PARTIAL SLIDES")
+                except Exception as repair_error:
+                    print(f"⚠️ JSON repair also failed: {repair_error}")
+                    
+            # Set fallback values if nothing was extracted
+            if not presentation.title:
+                presentation.title = f"Presentation - {presentation.prompt[:50]}"
+            if not presentation.outlines:
+                presentation.outlines = []
 
         sql_session.add(presentation)
         await sql_session.commit()
