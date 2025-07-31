@@ -130,93 +130,106 @@ const ChartWithBulletsSlideLayout: React.FC<ChartWithBulletsSlideLayoutProps> = 
     const renderChart = () => {
         const commonProps = {
             data: chartData,
-            margin: { top: 20, right: 30, left: 40, bottom: 60 },
+            margin: { top: 20, right: 20, left: 20, bottom: 20 },
+            width: undefined,
+            height: undefined,
         };
 
         switch (chartType) {
             case 'bar':
                 return (
-                    <BarChart {...commonProps}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey={xAxis} />
-                        <YAxis />
-                        {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
-                        {showLegend && <ChartLegend content={<ChartLegendContent />} />}
-                        <Bar dataKey={yAxis} fill={color} radius={[4, 4, 0, 0]} />
-                    </BarChart>
+                    <ResponsiveContainer width="100%" height="100%" minHeight={250}>
+                        <BarChart {...commonProps}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey={xAxis} />
+                            <YAxis />
+                            {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
+                            {showLegend && <ChartLegend content={<ChartLegendContent />} />}
+                            <Bar dataKey={yAxis} fill={color} radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
                 );
 
             case 'line':
                 return (
-                    <LineChart {...commonProps}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey={xAxis} />
-                        <YAxis />
-                        {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
-                        {showLegend && <ChartLegend content={<ChartLegendContent />} />}
-                        <Line
-                            type="monotone"
-                            dataKey={yAxis}
-                            stroke={color}
-                            strokeWidth={3}
-                            dot={{ fill: color, strokeWidth: 2, r: 4 }}
-                        />
-                    </LineChart>
+                    <ResponsiveContainer width="100%" height="100%" minHeight={250}>
+                        <LineChart {...commonProps}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey={xAxis} />
+                            <YAxis />
+                            {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
+                            {showLegend && <ChartLegend content={<ChartLegendContent />} />}
+                            <Line
+                                type="monotone"
+                                dataKey={yAxis}
+                                stroke={color}
+                                strokeWidth={3}
+                                dot={{ fill: color, strokeWidth: 2, r: 4 }}
+                            />
+                        </LineChart>
+                    </ResponsiveContainer>
                 );
 
             case 'area':
                 return (
-                    <AreaChart {...commonProps}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey={xAxis} />
-                        <YAxis />
-                        {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
-                        {showLegend && <ChartLegend content={<ChartLegendContent />} />}
-                        <Area
-                            type="monotone"
-                            dataKey={yAxis}
-                            stroke={color}
-                            fill={color}
-                            fillOpacity={0.6}
-                        />
-                    </AreaChart>
+                    <ResponsiveContainer width="100%" height="100%" minHeight={250}>
+                        <AreaChart {...commonProps}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey={xAxis} />
+                            <YAxis />
+                            {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
+                            {showLegend && <ChartLegend content={<ChartLegendContent />} />}
+                            <Area
+                                type="monotone"
+                                dataKey={yAxis}
+                                stroke={color}
+                                fill={color}
+                                fillOpacity={0.6}
+                            />
+                        </AreaChart>
+                    </ResponsiveContainer>
                 );
 
             case 'pie':
                 return (
-                    <PieChart margin={{ top: 20, right: 30, left: 40, bottom: 60 }}>
-                        {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
-                        {showLegend && <ChartLegend content={<ChartLegendContent />} />}
-                        <Pie
-                            data={chartData}
-                            cx="50%"
-                            cy="40%"
-                            outerRadius={70}
-                            fill={color}
-                            dataKey={yAxis}
-                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        >
-                            {chartData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                            ))}
-                        </Pie>
-                    </PieChart>
+                    <ResponsiveContainer width="100%" height="100%" minHeight={250}>
+                        <PieChart>
+                            {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
+                            {showLegend && <ChartLegend content={<ChartLegendContent />} />}
+                            <Pie
+                                data={chartData}
+                                cx="50%"
+                                cy="50%"
+                                outerRadius={80}
+                                innerRadius={0}
+                                fill={color}
+                                dataKey={yAxis}
+                                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                            >
+                                {chartData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                                ))}
+                            </Pie>
+                        </PieChart>
+                    </ResponsiveContainer>
                 );
 
             case 'scatter':
                 return (
-                    <ScatterChart {...commonProps}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey={xAxis} type="number" />
-                        <YAxis dataKey={yAxis} type="number" />
-                        {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
-                        {showLegend && <ChartLegend content={<ChartLegendContent />} />}
-                        <Scatter dataKey="value" fill={color} />
-                    </ScatterChart>
+                    <ResponsiveContainer width="100%" height="100%" minHeight={250}>
+                        <ScatterChart {...commonProps}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey={xAxis} type="number" />
+                            <YAxis dataKey={yAxis} type="number" />
+                            {showTooltip && <ChartTooltip content={<ChartTooltipContent />} />}
+                            {showLegend && <ChartLegend content={<ChartLegendContent />} />}
+                            <Scatter dataKey="value" fill={color} />
+                        </ScatterChart>
+                    </ResponsiveContainer>
                 );
 
             default:
-                return <div>Unsupported chart type</div>;
+                return <div className="flex items-center justify-center h-full text-gray-500">Unsupported chart type</div>;
         }
     };
 
@@ -249,8 +262,8 @@ const ChartWithBulletsSlideLayout: React.FC<ChartWithBulletsSlideLayoutProps> = 
                         </p>
 
                         {/* Chart Container */}
-                        <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-100 p-4">
-                            <ChartContainer config={chartConfig} className="h-full w-full">
+                        <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-100 p-4 min-h-0">
+                            <ChartContainer config={chartConfig} className="h-full w-full min-h-0">
                                 {renderChart()}
                             </ChartContainer>
                         </div>

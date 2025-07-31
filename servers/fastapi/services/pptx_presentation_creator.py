@@ -65,38 +65,63 @@ class PptxPresentationCreator:
         return element
 
     async def fetch_network_assets(self):
+        from utils.get_env import get_app_data_directory_env
+        
         image_urls = []
         models_with_network_asset: List[PptxPictureBoxModel] = []
+        app_data_dir = get_app_data_directory_env()
+
+        def resolve_local_path(image_path: str) -> str:
+            """Convert web paths to actual local file paths for offline environments."""
+            if image_path.startswith("http"):
+                return image_path  # Keep HTTP URLs as is for downloading
+            
+            if image_path.startswith("/app_data/"):
+                if app_data_dir:
+                    relative_path = image_path[10:]  # Remove "/app_data/"
+                    local_path = os.path.join(app_data_dir, relative_path)
+                    if os.path.exists(local_path):
+                        return local_path
+            
+            if image_path.startswith("/static/"):
+                # Handle static paths by looking in app_data or fallback
+                if app_data_dir:
+                    relative_path = image_path[8:]  # Remove "/static/"
+                    local_path = os.path.join(app_data_dir, "static", relative_path)
+                    if os.path.exists(local_path):
+                        return local_path
+            
+            # If it's already a local path and exists, use it
+            if os.path.exists(image_path):
+                return image_path
+                
+            return image_path  # Return as-is if we can't resolve it
 
         if self._ppt_model.shapes:
             for each_shape in self._ppt_model.shapes:
                 if isinstance(each_shape, PptxPictureBoxModel):
                     image_path = each_shape.picture.path
-                    if image_path.startswith("http"):
-                        if "app_data/" in image_path:
-                            relative_path = image_path.split("app_data/")[1]
-                            each_shape.picture.path = os.path.join(
-                                "/app_data", relative_path
-                            )
-                            each_shape.picture.is_network = False
-                            continue
-                        image_urls.append(image_path)
+                    resolved_path = resolve_local_path(image_path)
+                    
+                    if resolved_path.startswith("http"):
+                        image_urls.append(resolved_path)
                         models_with_network_asset.append(each_shape)
+                    else:
+                        each_shape.picture.path = resolved_path
+                        each_shape.picture.is_network = False
 
         for each_slide in self._slide_models:
             for each_shape in each_slide.shapes:
                 if isinstance(each_shape, PptxPictureBoxModel):
                     image_path = each_shape.picture.path
-                    if image_path.startswith("http"):
-                        if "app_data" in image_path:
-                            relative_path = image_path.split("app_data/")[1]
-                            each_shape.picture.path = os.path.join(
-                                "/app_data", relative_path
-                            )
-                            each_shape.picture.is_network = False
-                            continue
-                        image_urls.append(image_path)
+                    resolved_path = resolve_local_path(image_path)
+                    
+                    if resolved_path.startswith("http"):
+                        image_urls.append(resolved_path)
                         models_with_network_asset.append(each_shape)
+                    else:
+                        each_shape.picture.path = resolved_path
+                        each_shape.picture.is_network = False
 
         if image_urls:
             image_paths = await download_files(image_urls, self._temp_dir)

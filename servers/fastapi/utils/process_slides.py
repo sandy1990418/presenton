@@ -16,18 +16,34 @@ def convert_file_path_to_web_url(file_path: str) -> str:
     if file_path.startswith("http"):
         return file_path
     
+    # Check if already a web path
+    if file_path.startswith("/app_data/") or file_path.startswith("/static/"):
+        return file_path
+    
     # Get the app_data directory
-    app_data_dir = get_app_data_directory_env()
+    try:
+        app_data_dir = get_app_data_directory_env()
+        
+        # If the path contains app_data, extract the relative path
+        if app_data_dir and app_data_dir in file_path:
+            relative_path = os.path.relpath(file_path, app_data_dir)
+            # Convert to forward slashes for URL
+            relative_path = relative_path.replace(os.sep, '/')
+            return f"/app_data/{relative_path}"
+        
+        # If the path is in the images directory structure, make it web accessible
+        if "images/" in file_path:
+            # Extract everything after "images/"
+            parts = file_path.split("images/")
+            if len(parts) > 1:
+                image_path = parts[-1]
+                return f"/app_data/images/{image_path}"
+                
+    except Exception as e:
+        print(f"Warning: Could not convert file path: {e}")
     
-    # If the path contains app_data, extract the relative path
-    if app_data_dir in file_path:
-        relative_path = os.path.relpath(file_path, app_data_dir)
-        # Convert to forward slashes for URL
-        relative_path = relative_path.replace(os.sep, '/')
-        return f"/app_data/{relative_path}"
-    
-    # Fallback: return as is if it's already a web path
-    return file_path
+    # Fallback: return placeholder for broken images
+    return "/static/images/placeholder.jpg"
 
 
 async def process_slide_and_fetch_assets(
