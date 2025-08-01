@@ -3,6 +3,7 @@
 import React, { ReactNode, useRef, useEffect, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { updateSlideImage, updateSlideIcon, updateImageProperties } from '@/store/slices/presentationGeneration';
+import { getLocalImagePath } from '@/utils/imageUtils';
 import ImageEditor from './ImageEditor';
 import IconsEditor from './IconsEditor';
 
@@ -298,16 +299,17 @@ const EditableLayoutWrapper: React.FC<EditableLayoutWrapperProps> = ({
      */
     const handleImageChange = (newImageUrl: string, prompt?: string) => {
         if (activeEditor && activeEditor.element) {
-
+            // Convert the image URL to a web-accessible path for offline environments
+            const webAccessibleUrl = getLocalImagePath(newImageUrl);
 
             // Update the DOM element immediately for visual feedback
-            activeEditor.element.src = newImageUrl;
+            activeEditor.element.src = webAccessibleUrl;
 
-            // Update Redux store
+            // Update Redux store with the converted web URL for consistent frontend state
             dispatch(updateSlideImage({
                 slideIndex,
                 dataPath: activeEditor.dataPath,
-                imageUrl: newImageUrl,
+                imageUrl: webAccessibleUrl,  // Use converted URL for Redux state
                 prompt: prompt || activeEditor.data?.__image_prompt__ || ''
             }));
             setActiveEditor(null);
@@ -318,19 +320,19 @@ const EditableLayoutWrapper: React.FC<EditableLayoutWrapperProps> = ({
      */
     const handleIconChange = (newIconUrl: string, query?: string) => {
         if (activeEditor && activeEditor.element) {
+            // Convert the icon URL to a web-accessible path for offline environments
+            const webAccessibleUrl = getLocalImagePath(newIconUrl);
+            
             // Update the DOM element immediately for visual feedback
-            activeEditor.element.src = newIconUrl;
+            activeEditor.element.src = webAccessibleUrl;
 
-            // Update Redux store
+            // Update Redux store with the converted web URL for consistent frontend state
             dispatch(updateSlideIcon({
                 slideIndex,
                 dataPath: activeEditor.dataPath,
-                iconUrl: newIconUrl,
+                iconUrl: webAccessibleUrl,  // Use converted URL for Redux state
                 query: query || activeEditor.data?.__icon_query__ || ''
             }));
-
-
-
         }
     };
     const handleFocusPointClick = (propertiesData: any) => {

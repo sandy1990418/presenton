@@ -1,5 +1,5 @@
 import React from 'react';
-import { getImageSrc } from '@/utils/imageUtils';
+import { getImageSrc, getLocalImagePath } from '@/utils/imageUtils';
 
 interface OfflineImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   imageData?: {
@@ -15,14 +15,14 @@ interface OfflineImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
  * Image component that automatically handles offline/online image serving
  * Supports both imageData objects and direct src props
  */
-export const OfflineImage: React.FC<OfflineImageProps> = ({
+export const OfflineImage = React.forwardRef<HTMLImageElement, OfflineImageProps>(({
   imageData,
   src,
   alt,
   ...props
-}) => {
+}, ref) => {
   // Determine the image source
-  const imageSrc = imageData ? getImageSrc(imageData) : (src || '/static/images/placeholder.jpg');
+  const imageSrc = imageData ? getImageSrc(imageData) : getLocalImagePath(src);
   
   // Determine the alt text
   const imageAlt = alt || imageData?.__image_prompt__ || 'Image';
@@ -30,6 +30,7 @@ export const OfflineImage: React.FC<OfflineImageProps> = ({
   return (
     <img
       {...props}
+      ref={ref}
       src={imageSrc}
       alt={imageAlt}
       onError={(e) => {
@@ -42,6 +43,8 @@ export const OfflineImage: React.FC<OfflineImageProps> = ({
       }}
     />
   );
-};
+});
+
+OfflineImage.displayName = 'OfflineImage';
 
 export default OfflineImage;

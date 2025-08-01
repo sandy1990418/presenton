@@ -40,7 +40,7 @@ from utils.llm_calls.generate_presentation_structure import (
 from utils.llm_calls.generate_slide_content import (
     get_slide_content_from_type_and_outline,
 )
-from utils.process_slides import process_slide_and_fetch_assets
+from utils.process_slides import process_slide_and_fetch_assets, convert_file_path_to_web_url
 from utils.randomizers import get_random_uuid
 from utils.validators import validate_files
 from typing import Set
@@ -49,6 +49,33 @@ PRESENTATION_ROUTER = APIRouter(prefix="/presentation", tags=["Presentation"])
 
 # Track active streaming requests to prevent duplicates
 _active_streams: Set[str] = set()
+
+
+def convert_slide_image_urls(slides: List[SlideModel]) -> List[SlideModel]:
+    """Convert all image URLs in slide content to web-accessible paths."""
+    for slide in slides:
+        if slide.content:
+            # Convert image URLs recursively in slide content
+            slide.content = convert_urls_in_dict(slide.content)
+    return slides
+
+
+def convert_urls_in_dict(data: any) -> any:
+    """Recursively convert image URLs in a dictionary structure."""
+    if isinstance(data, dict):
+        converted = {}
+        for key, value in data.items():
+            if key == "__image_url__" and isinstance(value, str):
+                converted[key] = convert_file_path_to_web_url(value)
+            elif key == "__icon_url__" and isinstance(value, str):
+                converted[key] = convert_file_path_to_web_url(value)
+            else:
+                converted[key] = convert_urls_in_dict(value)
+        return converted
+    elif isinstance(data, list):
+        return [convert_urls_in_dict(item) for item in data]
+    else:
+        return data
 
 
 @PRESENTATION_ROUTER.get("", response_model=PresentationWithSlides)
@@ -63,9 +90,14 @@ async def get_presentation(
         .where(SlideModel.presentation == id)
         .order_by(SlideModel.index)
     )
+    slides_list = list(slides)
+    
+    # Convert all image URLs to web-accessible paths for offline environments
+    converted_slides = convert_slide_image_urls(slides_list)
+    
     return PresentationWithSlides(
         **presentation.model_dump(),
-        slides=slides,
+        slides=converted_slides,
     )
 
 
@@ -99,9 +131,13 @@ async def get_all_presentations(sql_session: AsyncSession = Depends(get_async_se
         )
         if not slides:
             return None
+        slides_list = list(slides)
+        # Convert all image URLs to web-accessible paths for offline environments
+        converted_slides = convert_slide_image_urls(slides_list)
+        
         return PresentationWithSlides(
             **presentation.model_dump(),
-            slides=slides,
+            slides=converted_slides,
         )
 
     tasks = [inner(p, sql_session) for p in presentations]
@@ -317,9 +353,12 @@ async def stream_presentation(
             sql_session.add_all(generated_assets)
             await sql_session.commit()
 
+            # Convert all image URLs to web-accessible paths for offline environments
+            converted_slides = convert_slide_image_urls(slides)
+            
             response = PresentationWithSlides(
                 **presentation.model_dump(),
-                slides=slides,
+                slides=converted_slides,
             )
 
             yield SSECompleteResponse(
@@ -360,9 +399,12 @@ async def update_presentation(
     sql_session.add_all(updated_slides)
     await sql_session.commit()
 
+    # Convert all image URLs to web-accessible paths for offline environments
+    converted_slides = convert_slide_image_urls(updated_slides)
+    
     return PresentationWithSlides(
         **presentation.model_dump(),
-        slides=updated_slides,
+        slides=converted_slides,
     )
 
 

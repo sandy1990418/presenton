@@ -18,6 +18,8 @@ import { PresentationGenerationApi } from "../services/api/presentation-generati
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { PreviousGeneratedImagesResponse } from "../services/api/params";
+import { convertImagePathForOffline } from "@/utils/imageUtils";
+import { OfflineImage } from "@/components/ui/OfflineImage";
 interface ImageEditorProps {
   initialImage: string | null;
   imageIdx?: number;
@@ -320,7 +322,7 @@ const ImageEditor = ({
                         className="aspect-[4/3] w-full overflow-hidden rounded-lg border cursor-pointer hover:border-blue-500 transition-colors"
                       >
                         {previewImages && (
-                          <img
+                          <OfflineImage
                             src={previewImages}
                             alt={`Preview`}
                             className="w-full h-full object-cover"
@@ -335,7 +337,7 @@ const ImageEditor = ({
                       <div className="grid grid-cols-2 gap-4">
                         {previousGeneratedImages.map((image) => (
                           <div onClick={() => handleImageChange(image.path)} key={image.id} className="aspect-[4/3] w-full overflow-hidden rounded-lg border cursor-pointer hover:border-blue-500 transition-colors" >
-                            <img src={image.path} alt={image.extras.prompt} className="w-full h-full object-cover" />
+                            <OfflineImage src={image.path} alt={image.extras.prompt} className="w-full h-full object-cover" />
                           </div>
                         ))}
                       </div>
@@ -415,7 +417,7 @@ const ImageEditor = ({
                               }
                               className="cursor-pointer group w-full h-full"
                             >
-                              <img
+                              <OfflineImage
                                 src={uploadedImageUrl}
                                 alt="Uploaded preview"
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform"
@@ -449,7 +451,7 @@ const ImageEditor = ({
 
                     className="aspect-[4/3] group  rounded-lg overflow-hidden relative border border-gray-200">
                     <p className="group-hover:opacity-100 opacity-0 transition-opacity absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-sm text-center font-medium bg-black/50 text-white px-2 py-1 rounded">Click to Change Focus Point</p>
-                    {previewImages && <img ref={imageRef} onClick={
+                    {previewImages && <OfflineImage ref={imageRef} onClick={
                       () => {
 
                         setIsFocusPointMode(true);

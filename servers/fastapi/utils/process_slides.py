@@ -12,37 +12,36 @@ from utils.get_env import get_app_data_directory_env
 
 
 def convert_file_path_to_web_url(file_path: str) -> str:
-    """Convert a local file path to a web-accessible URL."""
-    if file_path.startswith("http"):
-        return file_path
-    
-    # Check if already a web path
-    if file_path.startswith("/app_data/") or file_path.startswith("/static/"):
-        return file_path
-    
-    # Get the app_data directory
-    try:
-        app_data_dir = get_app_data_directory_env()
+    """Convert a local file path to a web-accessible URL for offline environments."""
+    if not file_path:
+        return "/static/images/placeholder.jpg"
         
-        # If the path contains app_data, extract the relative path
-        if app_data_dir and app_data_dir in file_path:
-            relative_path = os.path.relpath(file_path, app_data_dir)
-            # Convert to forward slashes for URL
-            relative_path = relative_path.replace(os.sep, '/')
+    # Already web-accessible URLs
+    if file_path.startswith(("http", "/app_data/", "/static/")):
+        return file_path
+    
+    # Handle database directory paths (your offline setup)
+    if "/database/" in file_path:
+        parts = file_path.split("/database/")
+        if len(parts) > 1:
+            relative_path = parts[-1]
             return f"/app_data/{relative_path}"
-        
-        # If the path is in the images directory structure, make it web accessible
-        if "images/" in file_path:
-            # Extract everything after "images/"
-            parts = file_path.split("images/")
-            if len(parts) > 1:
-                image_path = parts[-1]
-                return f"/app_data/images/{image_path}"
-                
-    except Exception as e:
-        print(f"Warning: Could not convert file path: {e}")
     
-    # Fallback: return placeholder for broken images
+    # Handle images directory paths
+    if "/images/" in file_path:
+        parts = file_path.split("/images/")
+        if len(parts) > 1:
+            image_path = parts[-1]
+            return f"/app_data/images/{image_path}"
+    
+    # Handle absolute paths by extracting filename
+    if os.path.isabs(file_path):
+        filename = os.path.basename(file_path)
+        if "/images/" in file_path:
+            return f"/app_data/images/{filename}"
+        return f"/app_data/{filename}"
+                
+    # Fallback
     return "/static/images/placeholder.jpg"
 
 

@@ -12,9 +12,41 @@ export function getLocalImagePath(imageUrl: string | undefined): string {
     return '/static/images/placeholder.jpg';
   }
 
-  // If it's already a local path, return as is
-  if (imageUrl.startsWith('/') || imageUrl.startsWith('./')) {
+  // If it's already a web accessible path, return as is
+  if (imageUrl.startsWith('/app_data/') || imageUrl.startsWith('/static/')) {
     return imageUrl;
+  }
+
+  // If it's a relative local path starting with ./ return as is
+  if (imageUrl.startsWith('./')) {
+    return imageUrl;
+  }
+
+  // Handle absolute local paths - extract relative portion for web serving
+  if (imageUrl.includes('/images/')) {
+    const parts = imageUrl.split('/images/');
+    if (parts.length > 1) {
+      const imagePath = parts[parts.length - 1];
+      return `/app_data/images/${imagePath}`;
+    }
+  }
+
+  // Handle paths that contain app_data directory
+  if (imageUrl.includes('/app_data/')) {
+    const parts = imageUrl.split('/app_data/');
+    if (parts.length > 1) {
+      const relativePath = parts[parts.length - 1];
+      return `/app_data/${relativePath}`;
+    }
+  }
+
+  // Handle database directory paths 
+  if (imageUrl.includes('/database/')) {
+    const parts = imageUrl.split('/database/');
+    if (parts.length > 1) {
+      const relativePath = parts[parts.length - 1];
+      return `/app_data/${relativePath}`;
+    }
   }
 
   // If it's an external URL, check if we have a local version
@@ -37,7 +69,13 @@ export function getLocalImagePath(imageUrl: string | undefined): string {
     return '/static/images/placeholder.jpg';
   }
 
+  // For any other local paths, assume they need to be served from app_data
+  if (imageUrl.startsWith('/')) {
+    return imageUrl;
+  }
+
   // Default fallback
+  console.warn(`Unable to convert image path for offline use: ${imageUrl}`);
   return '/static/images/placeholder.jpg';
 }
 
@@ -64,10 +102,16 @@ export function getImageSrc(imageData: any): string {
 
   const imageUrl = imageData.__image_url__;
   
-  // In offline mode or if URL is external, use local path
-  if (isOfflineMode() || imageUrl.startsWith('http')) {
-    return getLocalImagePath(imageUrl);
-  }
+  // Always use local path conversion for better offline support
+  return getLocalImagePath(imageUrl);
+}
 
-  return imageUrl;
+/**
+ * Convert a backend file path to a frontend-accessible URL for offline environments
+ * This is a convenience function that wraps getLocalImagePath for direct string usage
+ * @param imagePath - The image path from the backend
+ * @returns A frontend-accessible URL or fallback placeholder
+ */
+export function convertImagePathForOffline(imagePath: string): string {
+  return getLocalImagePath(imagePath);
 }

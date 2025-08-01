@@ -15,3 +15,7 @@ my-doc.txt
 .vscode
 .kiro/specs
 database
+.claude
+CLAUDE.md
+fastembed_vectorstore/
+# temp.*

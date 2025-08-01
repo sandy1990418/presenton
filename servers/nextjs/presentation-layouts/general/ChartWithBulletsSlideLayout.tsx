@@ -206,7 +206,7 @@ const ChartWithBulletsSlideLayout: React.FC<ChartWithBulletsSlideLayoutProps> = 
                                 dataKey={yAxis}
                                 label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                             >
-                                {chartData.map((entry, index) => (
+                                {chartData.map((_entry, index) => (
                                     <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                                 ))}
                             </Pie>
