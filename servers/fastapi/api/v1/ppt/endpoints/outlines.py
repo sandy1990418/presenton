@@ -51,7 +51,7 @@ async def stream_outlines(
                 raise ValueError("Empty content received")
                 
             presentation_content_json = json.loads(cleaned_content)
-            print(f"PARSED JSON: {presentation_content_json}")
+            # (f"PARSED JSON: {presentation_content_json}")
             
             # Validate required fields
             if "slides" not in presentation_content_json:

@@ -39,6 +39,7 @@ from utils.llm_calls.generate_presentation_structure import (
 )
 from utils.llm_calls.generate_slide_content import (
     get_slide_content_from_type_and_outline,
+    get_contextual_slide_content,
 )
 from utils.process_slides import process_slide_and_fetch_assets, convert_file_path_to_web_url
 from utils.randomizers import get_random_uuid
@@ -268,17 +269,14 @@ async def stream_presentation(
             layout = presentation.get_layout()
             outline = presentation.get_presentation_outline()
 
-            # Generate all slide content in parallel
-            slide_content_tasks = []
-            for i, slide_layout_index in enumerate(structure.slides):
-                slide_layout = layout.slides[slide_layout_index]
-                slide_content_tasks.append(
-                    get_slide_content_from_type_and_outline(slide_layout, outline.slides[i])
-                )
-
+            # Generate slide content sequentially with context for better continuity
+            total_slides = len(structure.slides)
+            all_slide_contents = []
+            generated_slides = []  # Track generated slides for context
+            
             yield SSEResponse(
                 event="response",
-                data=json.dumps({"type": "status", "status": f"Generating content for {len(structure.slides)} slides..."}),
+                data=json.dumps({"type": "status", "status": f"Generating content for {total_slides} slides with context..."}),
             ).to_string()
             
             yield SSEResponse(
@@ -286,9 +284,34 @@ async def stream_presentation(
                 data=json.dumps({"type": "chunk", "chunk": '{ "slides": [ '}),
             ).to_string()
 
-            # Wait for all slide content to be generated with progress tracking
-            total_slides = len(slide_content_tasks)
-            all_slide_contents = await asyncio.gather(*slide_content_tasks)
+            # Generate slides sequentially to maintain context
+            for i, slide_layout_index in enumerate(structure.slides):
+                slide_layout = layout.slides[slide_layout_index]
+                
+                yield SSEResponse(
+                    event="response",
+                    data=json.dumps({"type": "status", "status": f"Generating slide {i+1}/{total_slides}..."}),
+                ).to_string()
+                
+                # Use contextual generation for slides after the first one
+                if i == 0:
+                    # First slide uses standard generation
+                    slide_content = await get_slide_content_from_type_and_outline(
+                        slide_layout, outline.slides[i]
+                    )
+                else:
+                    # Subsequent slides use contextual generation
+                    slide_content = await get_contextual_slide_content(
+                        slide_layout, outline.slides[i], generated_slides
+                    )
+                
+                all_slide_contents.append(slide_content)
+                
+                # Add to generated slides context for next iteration
+                generated_slides.append({
+                    'title': outline.slides[i].title,
+                    'content': slide_content
+                })
             
             yield SSEResponse(
                 event="response",

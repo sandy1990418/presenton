@@ -7,7 +7,7 @@ class SlideOutlineModel(BaseModel):
         description="Title of the slide in about 3 to 5 words",
     )
     body: str = Field(
-        description="Content of the slide in markdown format",
+        description="Content of the slide in structured markdown format with topic headings and bullet points",
     )
 
 

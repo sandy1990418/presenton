@@ -15,6 +15,7 @@ import base64
 
 from services.database import get_async_session
 from services.image_embedding_service import ImageEmbeddingService
+from services.reference_image_extractor import ReferenceImageExtractor
 from models.sql.presentation import PresentationModel
 from utils.asset_directory_utils import get_images_directory
 
@@ -24,6 +25,7 @@ IMAGE_MATCHING_ROUTER = APIRouter(prefix="/image-matching", tags=["Image Matchin
 
 # Initialize the embedding service
 image_embedding_service = ImageEmbeddingService()
+reference_extractor = ReferenceImageExtractor()
 
 @IMAGE_MATCHING_ROUTER.post("/process-extracted-images")
 async def process_extracted_images(
@@ -292,4 +294,99 @@ async def match_single_image(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to match image: {str(e)}"
+        )
+
+@IMAGE_MATCHING_ROUTER.post("/process-reference-document")
+async def process_reference_document(
+    presentation_id: str = Form(...),
+    document_content: str = Form(...),
+    document_url: str = Form(None),
+    sql_session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Process a reference document to extract and match images to presentation slides
+    """
+    try:
+        # Get presentation
+        presentation = await sql_session.get(PresentationModel, presentation_id)
+        if not presentation:
+            raise HTTPException(status_code=404, detail="Presentation not found")
+        
+        # Get slide outlines
+        slide_outlines = presentation.outlines or []
+        
+        if not slide_outlines:
+            raise HTTPException(
+                status_code=400, 
+                detail="No slide outlines available. Please generate presentation outline first."
+            )
+        
+        # Process the reference document
+        logger.info(f"Processing reference document for presentation {presentation_id}")
+        results = await reference_extractor.process_reference_document(
+            document_content=document_content,
+            slide_outlines=slide_outlines,
+            document_url=document_url
+        )
+        
+        if not results["success"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to process reference document: {results.get('error', 'Unknown error')}"
+            )
+        
+        # Format response
+        response_data = {
+            "success": True,
+            "message": results["processing_summary"],
+            "documentAnalysis": {
+                "summary": results["document_analysis"]["document_summary"],
+                "keyConcepts": results["document_analysis"]["key_concepts"],
+                "totalImagesIdentified": results["total_images_identified"]
+            },
+            "imageMatches": results["image_matches"],
+            "totalMatches": results["total_matches"],
+            "recommendations": []
+        }
+        
+        # Add recommendations based on matches
+        if results["image_matches"]:
+            high_confidence_matches = [m for m in results["image_matches"] if m["confidence"] > 0.7]
+            if high_confidence_matches:
+                response_data["recommendations"].append(
+                    f"Found {len(high_confidence_matches)} high-confidence image matches. "
+                    f"Consider adding these images to enhance your presentation."
+                )
+            
+            # Group matches by slide
+            slides_with_images = {}
+            for match in results["image_matches"]:
+                slide_idx = match["slide_index"]
+                if slide_idx not in slides_with_images:
+                    slides_with_images[slide_idx] = []
+                slides_with_images[slide_idx].append(match)
+            
+            for slide_idx, matches in slides_with_images.items():
+                if len(matches) > 1:
+                    response_data["recommendations"].append(
+                        f"Slide {slide_idx + 1} ({matches[0]['slide_title']}) has {len(matches)} potential images. "
+                        f"Consider selecting the most relevant one to avoid overcrowding."
+                    )
+        else:
+            response_data["recommendations"].append(
+                "No relevant images found in the reference document for your presentation slides. "
+                "The document may not contain visual content suitable for your topic."
+            )
+        
+        logger.info(f"Successfully processed reference document: {results['processing_summary']}")
+        
+        return JSONResponse(response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error processing reference document")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process reference document: {str(e)}"
         )
