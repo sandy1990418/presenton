@@ -4,12 +4,17 @@ import json
 from typing import List, Dict, Any, Optional
 from urllib.parse import quote
 import logging
+from utils.llm_provider import is_google_selected, is_openai_selected
 
 logger = logging.getLogger(__name__)
 
 class WebSearchService:
     """
-    Web search service that provides search functionality for LLM tool calling
+    Unified web search service that adapts to current LLM provider
+    
+    - For Google/Gemini: Uses native grounding search (handled in LLM generation)
+    - For OpenAI: Uses custom search implementation (until Responses API is integrated)
+    - For other providers: Uses custom search implementation
     """
     
     def __init__(self):
@@ -114,9 +119,21 @@ class WebSearchService:
     
     async def comprehensive_search(self, query: str, max_results: int = 8) -> List[Dict[str, Any]]:
         """
-        Perform comprehensive search using multiple sources
+        Perform comprehensive search adapting to current LLM provider
+        
+        - For Google/Gemini: Returns empty list (native grounding handles search)
+        - For OpenAI/Others: Uses custom search implementation
         """
         try:
+            if is_google_selected():
+                # For Gemini, web search is handled natively via grounding
+                # This service is not needed - return empty to avoid duplicate searches
+                logger.info("Using Gemini native grounding search - skipping custom search")
+                return []
+            
+            # For OpenAI and other providers, use custom search
+            logger.info(f"Using custom search implementation for current LLM provider")
+            
             # Run searches in parallel
             tasks = [
                 self.search_duckduckgo(query, max_results // 2),

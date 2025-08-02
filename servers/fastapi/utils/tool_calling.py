@@ -2,6 +2,7 @@ import json
 import logging
 from typing import List, Dict, Any, Optional, Callable
 from services.web_search_service import web_search_service
+from services.source_citation_service import citation_service
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +12,12 @@ class ToolRegistry:
     def __init__(self):
         self.tools: Dict[str, Dict[str, Any]] = {}
         self.tool_functions: Dict[str, Callable] = {}
+        self.current_presentation_id: Optional[str] = None
         self._register_default_tools()
+    
+    def set_presentation_context(self, presentation_id: str):
+        """Set the current presentation context for citation tracking"""
+        self.current_presentation_id = presentation_id
     
     def _register_default_tools(self):
         """Register default tools available for LLM"""
@@ -52,7 +58,7 @@ class ToolRegistry:
         logger.info(f"Registered tool: {name}")
     
     async def _web_search_tool(self, query: str, max_results: int = 5) -> Dict[str, Any]:
-        """Web search tool implementation"""
+        """Web search tool implementation with citation tracking"""
         try:
             results = await web_search_service.comprehensive_search(query, max_results)
             
@@ -62,6 +68,13 @@ class ToolRegistry:
                     "message": "No search results found",
                     "results": []
                 }
+            
+            # Add citations to presentation if context is available
+            if self.current_presentation_id:
+                citation_service.add_search_results_to_presentation(
+                    self.current_presentation_id, results, query
+                )
+                logger.info(f"WEB SEARCH EXECUTED - Query: '{query}' | Results: {len(results)} | Presentation: {self.current_presentation_id}")
             
             # Format results for LLM consumption
             formatted_results = []

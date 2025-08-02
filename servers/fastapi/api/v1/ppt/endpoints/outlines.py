@@ -34,6 +34,7 @@ async def stream_outlines(
             presentation.language,
             presentation.summary,
             presentation.web_search_enabled,
+            presentation.id,
         ):
             # Give control to the event loop
             await asyncio.sleep(0)
@@ -86,8 +87,9 @@ async def stream_outlines(
             if presentation_content_text:
                 try:
                     # Try to repair incomplete JSON
-                    from jsonrepair import jsonrepair
-                    repaired_json = jsonrepair(presentation_content_text)
+                    from json_repair import repair_json
+
+                    repaired_json = repair_json(presentation_content_text)
                     partial_json = json.loads(repaired_json)
                     
                     if "title" in partial_json:

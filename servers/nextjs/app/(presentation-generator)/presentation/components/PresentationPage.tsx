@@ -18,6 +18,7 @@ import {
 } from "../hooks";
 import { PresentationPageProps } from "../types";
 import LoadingState from "./LoadingState";
+import CitationFooter from "./CitationFooter";
 
 const PresentationPage: React.FC<PresentationPageProps> = ({ presentation_id }) => {
 
@@ -78,6 +79,7 @@ const PresentationPage: React.FC<PresentationPageProps> = ({ presentation_id }) 
       <PresentationMode
         slides={presentationData?.slides!}
         currentSlide={selectedSlide}
+        presentationId={presentation_id}
         isFullscreen={isFullscreen}
         onFullscreenToggle={toggleFullscreen}
         onExit={handlePresentExit}
@@ -171,6 +173,14 @@ const PresentationPage: React.FC<PresentationPageProps> = ({ presentation_id }) 
           </div>
         </div>
       </div>
+      
+      {/* Citation Footer - only show when presentation is loaded */}
+      {presentationData && presentationData.slides && presentationData.slides.length > 0 && (
+        <CitationFooter 
+          presentationId={presentation_id} 
+          className="fixed bottom-0 left-0 right-0 z-10"
+        />
+      )}
     </div>
   );
 };

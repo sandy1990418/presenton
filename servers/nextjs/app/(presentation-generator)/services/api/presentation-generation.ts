@@ -230,7 +230,66 @@ export class PresentationGenerationApi {
       throw error;
     }
   }
-  
-  
+
+  // CITATION MANAGEMENT
+  static async getCitations(presentationId: string) {
+    try {
+      const response = await fetch(
+        `/api/v1/ppt/image-matching/citations/${presentationId}`,
+        {
+          method: "GET",
+          headers: getHeader(),
+          cache: "no-cache",
+        }
+      );
+      return await ApiResponseHandler.handleResponse(response, "Failed to fetch citations");
+    } catch (error) {
+      console.error("error in fetching citations", error);
+      throw error;
+    }
+  }
+
+  static async getSlideCitations(presentationId: string, slideContent: string) {
+    try {
+      const response = await fetch(
+        `/api/v1/ppt/image-matching/citations/${presentationId}/slide?slide_content=${encodeURIComponent(slideContent)}`,
+        {
+          method: "GET",
+          headers: getHeader(),
+          cache: "no-cache",
+        }
+      );
+      return await ApiResponseHandler.handleResponse(response, "Failed to fetch slide citations");
+    } catch (error) {
+      console.error("error in fetching slide citations", error);
+      throw error;
+    }
+  }
+
+  // REFERENCE DOCUMENT PROCESSING
+  static async processReferenceDocument(presentationId: string, documentContent: string, documentUrl?: string) {
+    const formData = new FormData();
+    formData.append("presentation_id", presentationId);
+    formData.append("document_content", documentContent);
+    if (documentUrl) {
+      formData.append("document_url", documentUrl);
+    }
+
+    try {
+      const response = await fetch(
+        `/api/v1/ppt/image-matching/process-reference-document`,
+        {
+          method: "POST",
+          headers: getHeaderForFormData(),
+          body: formData,
+          cache: "no-cache",
+        }
+      );
+      return await ApiResponseHandler.handleResponse(response, "Failed to process reference document");
+    } catch (error) {
+      console.error("error in processing reference document", error);
+      throw error;
+    }
+  }
 
 }

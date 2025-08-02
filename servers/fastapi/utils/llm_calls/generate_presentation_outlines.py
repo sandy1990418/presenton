@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 from google.genai.types import GenerateContentConfig
 from openai.types.chat.chat_completion_chunk import ChoiceDelta
@@ -12,6 +13,8 @@ from utils.llm_provider import (
 )
 from utils.tool_calling import tool_registry, handle_tool_calls, should_use_web_search
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 system_prompt = """
 You are an expert presentation creator. Generate structured presentations based on user requirements and format them according to the specified JSON schema with markdown content.
@@ -114,6 +117,7 @@ async def generate_ppt_outline(
     language: Optional[str] = None,
     content: Optional[str] = None,
     web_search_enabled: bool = False,
+    presentation_id: Optional[str] = None,
 ):
     model = get_large_model()
     response_model = get_presentation_outline_model_with_n_slides(n_slides)
@@ -124,56 +128,143 @@ async def generate_ppt_outline(
         # Determine if we should use web search
         use_web_search = web_search_enabled and prompt and should_use_web_search(prompt)
         
-        # Prepare tools if web search is enabled
-        tools = tool_registry.get_tools_schema() if use_web_search else None
+        # DEBUG: Log web search decision process
+        logger.info(f"OPENAI WEB SEARCH DECISION - web_search_enabled: {web_search_enabled} | prompt_exists: {bool(prompt)} | should_use_web_search: {should_use_web_search(prompt) if prompt else False} | final_decision: {use_web_search}")
         
         messages = get_prompt_template(prompt, n_slides, language, content)
         
-        # Add web search instruction if enabled
         if use_web_search:
+            # Set presentation context for citation tracking
+            if presentation_id:
+                tool_registry.set_presentation_context(presentation_id)
+                logger.info(f"OPENAI WEB SEARCH ENABLED for presentation: {presentation_id}")
+            
+            # Add web search instruction to system prompt
             system_message = next((msg for msg in messages if msg["role"] == "system"), None)
             if system_message:
-                system_message["content"] += "\n\nIMPORTANT: If you need current information, statistics, or recent data to create accurate content, use the web_search tool to find relevant information before generating the presentation outline."
-        
-        async for response in await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=True,
-            response_format=get_response_format(response_model),
-            tools=tools,
-            tool_choice="auto" if tools else None,
-        ):
-            delta: ChoiceDelta = response.choices[0].delta
+                system_message["content"] += "\n\nIMPORTANT: If you need current information, statistics, or recent data to create accurate content, search for relevant information to ensure accuracy."
             
-            # Handle tool calls
-            if delta.tool_calls:
-                # For streaming, we need to handle tool calls differently
-                # This is a simplified approach - in production you might want more sophisticated handling
-                pass
-            elif delta.content:
-                yield delta.content
+            # Try using OpenAI's web search via Chat Completions with web_search_options
+            try:
+                logger.info("OPENAI: Attempting to use web search via Chat Completions API")
+                
+                # Use Chat Completions with web_search_options and search models
+                search_model = "gpt-4o-search-preview" if "gpt-4" in model else "gpt-4o-mini-search-preview"
+                
+                response = await client.chat.completions.create(
+                    model=search_model,
+                    messages=messages,
+                    web_search_options={},  # Enable web search
+                    response_format=get_response_format(response_model)
+                )
+                
+                if response.choices[0].message.content:
+                    logger.info("OPENAI: Successfully used native web search with search model")
+                    yield response.choices[0].message.content
+                    return
+                    
+            except Exception as search_error:
+                logger.warning(f"OPENAI: Search model failed, trying Responses API: {search_error}")
+                
+                # Try Responses API as second option
+                try:
+                    logger.info("OPENAI: Attempting Responses API with web_search_preview")
+                    
+                    # Note: This might need different client or API call
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        tools=[{"type": "web_search_preview"}],
+                        response_format=get_response_format(response_model)
+                    )
+                    
+                    if response.choices[0].message.content:
+                        logger.info("OPENAI: Successfully used Responses API web search")
+                        yield response.choices[0].message.content
+                        return
+                        
+                except Exception as responses_error:
+                    logger.warning(f"OPENAI: Responses API also failed, falling back to custom: {responses_error}")
+                    
+                    # Final fallback to custom tool implementation
+                    tools = tool_registry.get_tools_schema()
+                    
+                    async for response in await client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        stream=True,
+                        response_format=get_response_format(response_model),
+                        tools=tools,
+                        tool_choice="auto",
+                    ):
+                        delta: ChoiceDelta = response.choices[0].delta
+                        
+                        # Handle tool calls (simplified - ignoring for now)
+                        if delta.tool_calls:
+                            pass
+                        elif delta.content:
+                            yield delta.content
+        else:
+            # No web search needed, use standard streaming
+            async for response in await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                stream=True,
+                response_format=get_response_format(response_model),
+            ):
+                delta: ChoiceDelta = response.choices[0].delta
+                if delta.content:
+                    yield delta.content
 
     else:
         client = get_google_llm_client()
+        
+        # Determine if we should use web search (same logic as OpenAI)
+        use_web_search = web_search_enabled and prompt and should_use_web_search(prompt)
+        
+        # DEBUG: Log web search decision process for Google too
+        logger.info(f"GEMINI WEB SEARCH DECISION - web_search_enabled: {web_search_enabled} | prompt_exists: {bool(prompt)} | should_use_web_search: {should_use_web_search(prompt) if prompt else False} | final_decision: {use_web_search}")
+        
+        # Set presentation context for citation tracking
+        if use_web_search and presentation_id:
+            tool_registry.set_presentation_context(presentation_id)
+            logger.info(f"GEMINI GROUNDING SEARCH ENABLED for presentation: {presentation_id}")
+        
+        # Configure Gemini generation
+        if use_web_search:
+            # For web search, use google_search tool without structured output
+            # Based on error: "controlled generation is not supported with google_search tool"
+            system_message_with_search = system_prompt + "\n\nIMPORTANT: If you need current information, statistics, or recent data to create accurate content, search for relevant information using grounding with Google Search. Please format your response as valid JSON matching this exact structure: " + str(response_model.model_json_schema())
+            
+            config_kwargs = {
+                "system_instruction": system_message_with_search,
+                "tools": [{"google_search": {}}]  # google_search tool without controlled generation
+            }
+            logger.info("GEMINI: Using native grounding search with google_search tool (manual JSON formatting)")
+        else:
+            # No web search, use structured output with correct parameter name
+            config_kwargs = {
+                "system_instruction": system_prompt,
+                "response_mime_type": "application/json",
+                "response_schema": response_model,  # Use response_schema instead of response_json_schema
+            }
+            logger.info("GEMINI: Using structured output with response_schema (no web search)")
+        
         generate_stream = iterator_to_async(client.models.generate_content_stream)
         try:
+            config = GenerateContentConfig(**config_kwargs)
+            print("use_web_search:", config)
             async for event in generate_stream(
                 model=model,
                 contents=[get_user_prompt(prompt, n_slides, language, content)],
-                config=GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    response_mime_type="application/json",
-                    response_json_schema=response_model.model_json_schema(),
-                ),
+                config=config,
             ):
                 if event.text:
                     yield event.text
         except Exception as e:
             # If Google API fails, try OpenAI as fallback
             import json
-            import logging
             
-            logger = logging.getLogger(__name__)
             logger.exception("Google GenAI API failed, attempting OpenAI fallback")
             
             try:

@@ -10,12 +10,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Slide } from "../types/slide";
 import { useGroupLayouts } from "../hooks/useGroupLayouts";
+import CitationFooter from "../presentation/components/CitationFooter";
 
 
 interface PresentationModeProps {
   slides: Slide[];
   currentSlide: number;
-
+  presentationId: string;
   isFullscreen: boolean;
   onFullscreenToggle: () => void;
   onExit: () => void;
@@ -23,10 +24,9 @@ interface PresentationModeProps {
 }
 
 const PresentationMode: React.FC<PresentationModeProps> = ({
-
   slides,
   currentSlide,
-
+  presentationId,
   isFullscreen,
   onFullscreenToggle,
   onExit,
@@ -195,6 +195,13 @@ const PresentationMode: React.FC<PresentationModeProps> = ({
             renderSlideContent(slides[currentSlide], false)}
         </div>
       </div>
+      
+      {/* Citation Footer for fullscreen mode */}
+      <CitationFooter 
+        presentationId={presentationId} 
+        className="fixed bottom-0 left-0 right-0 z-30"
+        theme="dark"
+      />
     </div>
   );
 };

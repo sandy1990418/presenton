@@ -16,6 +16,7 @@ import base64
 from services.database import get_async_session
 from services.image_embedding_service import ImageEmbeddingService
 from services.reference_image_extractor import ReferenceImageExtractor
+from services.source_citation_service import citation_service
 from models.sql.presentation import PresentationModel
 from utils.asset_directory_utils import get_images_directory
 
@@ -389,4 +390,74 @@ async def process_reference_document(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process reference document: {str(e)}"
+        )
+
+@IMAGE_MATCHING_ROUTER.get("/citations/{presentation_id}")
+async def get_presentation_citations(
+    presentation_id: str,
+    sql_session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Get web search source citations for a presentation
+    """
+    try:
+        # Verify presentation exists
+        presentation = await sql_session.get(PresentationModel, presentation_id)
+        if not presentation:
+            raise HTTPException(status_code=404, detail="Presentation not found")
+        
+        # Get citations
+        citations = citation_service.get_presentation_citations(presentation_id)
+        
+        return JSONResponse({
+            "success": True,
+            "presentationId": presentation_id,
+            "citations": citations,
+            "totalCitations": len(citations),
+            "citationsFooter": citation_service.generate_citations_footer(presentation_id)
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error getting presentation citations")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get citations: {str(e)}"
+        )
+
+@IMAGE_MATCHING_ROUTER.get("/citations/{presentation_id}/slide")
+async def get_slide_citations(
+    presentation_id: str,
+    slide_content: str = "",
+    sql_session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Get relevant citations for a specific slide based on content
+    """
+    try:
+        # Verify presentation exists
+        presentation = await sql_session.get(PresentationModel, presentation_id)
+        if not presentation:
+            raise HTTPException(status_code=404, detail="Presentation not found")
+        
+        # Get relevant citations for this slide
+        relevant_citations = citation_service.get_citation_links_for_slide(
+            presentation_id, slide_content
+        )
+        
+        return JSONResponse({
+            "success": True,
+            "presentationId": presentation_id,
+            "slideCitations": relevant_citations,
+            "totalRelevantCitations": len(relevant_citations)
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error getting slide citations")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get slide citations: {str(e)}"
         )
