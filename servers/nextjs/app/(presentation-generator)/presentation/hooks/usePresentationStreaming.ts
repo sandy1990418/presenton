@@ -49,23 +49,23 @@ export const usePresentationStreaming = (
     const initializeStream = async () => {
       // Global check for active streams
       if (globalStreamState.isStreaming(presentationId)) {
-        console.warn(`🚫 Global state: Stream already active for presentation ${presentationId}`);
+        console.warn(`Global state: Stream already active for presentation ${presentationId}`);
         return;
       }
       
       // Prevent concurrent streaming requests
       if (streamingRef.current) {
-        console.warn("🚫 Local state: Stream already in progress, ignoring duplicate request");
+        console.warn("Local state: Stream already in progress, ignoring duplicate request");
         return;
       }
       
       // Prevent re-streaming the same presentation
       if (lastStreamedPresentationRef.current === presentationId) {
-        console.warn(`🚫 Cache: Presentation ${presentationId} already streamed, ignoring duplicate request`);
+        console.warn(`Cache: Presentation ${presentationId} already streamed, ignoring duplicate request`);
         return;
       }
       
-      console.log(`✅ Starting stream for presentation ${presentationId}`);
+      console.log(`Starting stream for presentation ${presentationId}`);
       cleanup(); // Ensure clean state
       streamingRef.current = true;
       lastStreamedPresentationRef.current = presentationId;
@@ -98,7 +98,7 @@ export const usePresentationStreaming = (
               break;
               
             case "error":
-              console.error("❌ Stream error:", data.error);
+              console.error("Stream error:", data.error);
               cleanup();
               setError(true);
               setLoading(false);

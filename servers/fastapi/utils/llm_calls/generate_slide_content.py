@@ -36,8 +36,14 @@ system_prompt = """
 """
 
 
-def get_user_prompt(title: str, outline: str):
+def get_user_prompt(title: str, outline: str, language: str):
     return f"""
+        ## Icon Query And Image Prompt Language
+        English
+
+        ## Slide Content Language
+        {language}
+
         ## Slide Title
         {title}
 
@@ -46,7 +52,7 @@ def get_user_prompt(title: str, outline: str):
     """
 
 
-def get_prompt_to_generate_slide_content(title: str, outline: str):
+def get_prompt_to_generate_slide_content(title: str, outline: str, language: str):
 
     return [
         {
@@ -55,13 +61,13 @@ def get_prompt_to_generate_slide_content(title: str, outline: str):
         },
         {
             "role": "user",
-            "content": get_user_prompt(title, outline),
+            "content": get_user_prompt(title, outline, language),
         },
     ]
 
 
 async def get_slide_content_from_type_and_outline(
-    slide_layout: SlideLayoutModel, outline: SlideOutlineModel
+    slide_layout: SlideLayoutModel, outline: SlideOutlineModel, language: str
 ):
     model = get_large_model()
 
@@ -76,6 +82,7 @@ async def get_slide_content_from_type_and_outline(
             messages=get_prompt_to_generate_slide_content(
                 outline.title,
                 outline.body,
+                language,
             ),
             response_format={
                 "type": "json_schema",
@@ -91,7 +98,7 @@ async def get_slide_content_from_type_and_outline(
         response = await asyncio.to_thread(
             client.models.generate_content,
             model=model,
-            contents=[get_user_prompt(outline.title, outline.body)],
+            contents=[get_user_prompt(outline.title, outline.body, language)],
             config=GenerateContentConfig(
                 system_instruction=system_prompt,
                 response_mime_type="application/json",
@@ -129,7 +136,7 @@ contextual_system_prompt = """
 """
 
 
-def get_contextual_user_prompt(title: str, outline: str, previous_slides: List[Dict[str, Any]]):
+def get_contextual_user_prompt(title: str, outline: str, previous_slides: List[Dict[str, Any]], language: str):
     # Create a summary of previous slides for context
     context_summary = ""
     if previous_slides:
@@ -149,6 +156,12 @@ def get_contextual_user_prompt(title: str, outline: str, previous_slides: List[D
             context_summary += f"### Slide {i}: {slide_title}\n{slide_content}\n"
     
     return f"""
+        ## Icon Query And Image Prompt Language
+        English
+
+        ## Slide Content Language
+        {language}
+
         {context_summary}
         ## Current Slide Title
         {title}
@@ -159,7 +172,7 @@ def get_contextual_user_prompt(title: str, outline: str, previous_slides: List[D
 
 
 def get_contextual_prompt_to_generate_slide_content(
-    title: str, outline: str, previous_slides: List[Dict[str, Any]]
+    title: str, outline: str, previous_slides: List[Dict[str, Any]], language: str
 ):
     return [
         {
@@ -168,7 +181,7 @@ def get_contextual_prompt_to_generate_slide_content(
         },
         {
             "role": "user",
-            "content": get_contextual_user_prompt(title, outline, previous_slides),
+            "content": get_contextual_user_prompt(title, outline, previous_slides, language),
         },
     ]
 
@@ -176,7 +189,8 @@ def get_contextual_prompt_to_generate_slide_content(
 async def get_contextual_slide_content(
     slide_layout: SlideLayoutModel, 
     outline: SlideOutlineModel,
-    all_previous_slides: List[Dict[str, Any]]
+    all_previous_slides: List[Dict[str, Any]],
+    language: str
 ):
     """
     Generate slide content with context from previous slides for better continuity.
@@ -203,6 +217,7 @@ async def get_contextual_slide_content(
                 outline.title,
                 outline.body,
                 all_previous_slides,
+                language,
             ),
             response_format={
                 "type": "json_schema",
@@ -218,7 +233,7 @@ async def get_contextual_slide_content(
         response = await asyncio.to_thread(
             client.models.generate_content,
             model=model,
-            contents=[get_contextual_user_prompt(outline.title, outline.body, all_previous_slides)],
+            contents=[get_contextual_user_prompt(outline.title, outline.body, all_previous_slides, language)],
             config=GenerateContentConfig(
                 system_instruction=contextual_system_prompt,
                 response_mime_type="application/json",

@@ -128,13 +128,9 @@ async def get_all_presentations(sql_session: AsyncSession = Depends(get_async_se
         )
         if not first_slide:
             return None
-        slides_list = list(slides)
-        # Convert all image URLs to web-accessible paths for offline environments
-        converted_slides = convert_slide_image_urls(slides_list)
-        
         return PresentationWithSlides(
             **presentation.model_dump(),
-            slides=converted_slides,
+            slides=[first_slide],
         )
 
     tasks = [inner(p, sql_session) for p in presentations]
@@ -293,12 +289,12 @@ async def stream_presentation(
                 if i == 0:
                     # First slide uses standard generation
                     slide_content = await get_slide_content_from_type_and_outline(
-                        slide_layout, outline.slides[i]
+                        slide_layout, outline.slides[i], presentation.language
                     )
                 else:
                     # Subsequent slides use contextual generation
                     slide_content = await get_contextual_slide_content(
-                        slide_layout, outline.slides[i], generated_slides
+                        slide_layout, outline.slides[i], generated_slides, presentation.language
                     )
                 
                 all_slide_contents.append(slide_content)
@@ -386,7 +382,7 @@ async def stream_presentation(
             ).to_string()
             
         except Exception as e:
-            print(f"❌ Error in streaming: {e}")
+            print(f"Error in streaming: {e}")
             yield SSEResponse(
                 event="response",
                 data=json.dumps({"type": "error", "error": f"Stream error: {str(e)}"}),
@@ -546,8 +542,8 @@ async def generate_presentation_api(
     for i, slide_layout_index in enumerate(presentation_structure.slides):
         slide_layout = layout_model.slides[slide_layout_index]
         print(f"Generating content for slide {i} with layout {slide_layout.id}")
-        slide_content_tasks.append(
-            get_slide_content_from_type_and_outline(slide_layout, outlines[i])
+        slide_content = await get_slide_content_from_type_and_outline(
+            slide_layout, outlines[i], language
         )
 
     # Wait for all slide content to be generated
