@@ -84,33 +84,37 @@ async def stream_outlines(
             print(f"CONTENT PREVIEW: {presentation_content_text[:500]}...")
             
             # Try to extract partial information
-            if presentation_content_text:
-                try:
-                    # Try to repair incomplete JSON
-                    from json_repair import repair_json
+            # if presentation_content_text:
+            #     try:
+            #         # Try to repair incomplete JSON
+            #         from json_repair import repair_json
 
-                    repaired_json = repair_json(presentation_content_text)
-                    partial_json = json.loads(repaired_json)
+            #         repaired_json = repair_json(presentation_content_text)
+            #         partial_json = json.loads(repaired_json)
                     
-                    if "title" in partial_json:
-                        presentation.title = partial_json["title"]
-                        print(f"✅ EXTRACTED TITLE: {presentation.title}")
+            #         if "title" in partial_json:
+            #             presentation.title = partial_json["title"]
+            #             print(f"✅ EXTRACTED TITLE: {presentation.title}")
                     
-                    if "slides" in partial_json and isinstance(partial_json["slides"], list):
-                        # Create fallback slides from partial data
-                        presentation.outlines = []
-                        for slide_data in partial_json["slides"][:presentation.n_slides]:
-                            if isinstance(slide_data, dict) and "title" in slide_data:
-                                presentation.outlines.append(slide_data)
-                        print(f"✅ EXTRACTED {len(presentation.outlines)} PARTIAL SLIDES")
-                except Exception as repair_error:
-                    print(f"⚠️ JSON repair also failed: {repair_error}")
+            #         if "slides" in partial_json and isinstance(partial_json["slides"], list):
+            #             # Create fallback slides from partial data
+            #             presentation.outlines = []
+            #             for slide_data in partial_json["slides"][:presentation.n_slides]:
+            #                 if isinstance(slide_data, dict) and "title" in slide_data:
+            #                     presentation.outlines.append(slide_data)
+            #             print(f"✅ EXTRACTED {len(presentation.outlines)} PARTIAL SLIDES")
+            #     except Exception as repair_error:
+            #         print(f"⚠️ JSON repair also failed: {repair_error}")
                     
-            # Set fallback values if nothing was extracted
-            if not presentation.title:
-                presentation.title = f"Presentation - {presentation.prompt[:50]}"
-            if not presentation.outlines:
-                presentation.outlines = []
+            # # Set fallback values if nothing was extracted
+            # if not presentation.title:
+            #     presentation.title = f"Presentation - {presentation.prompt[:50]}"
+            # if not presentation.outlines:
+            #     presentation.outlines = []
+        presentation.title = presentation_content.title
+        presentation.outlines = [
+            each.model_dump() for each in presentation_content.slides
+        ]
 
         sql_session.add(presentation)
         await sql_session.commit()

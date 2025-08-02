@@ -14,7 +14,8 @@ import uuid
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-from utils.llm_provider import get_llm_client, get_large_model, is_google_selected
+from services.llm_client import LLMClient
+from utils.llm_provider import get_llm_provider, is_google_selected
 from services.image_embedding_service import ImageEmbeddingService
 from utils.asset_directory_utils import get_images_directory
 
@@ -75,10 +76,10 @@ class ReferenceImageExtractor:
         Please analyze this document and identify potential images with their context and relevance.
         """
         
-        model = get_large_model()
+        model = get_llm_provider()
         
         if not is_google_selected():
-            client = get_llm_client()
+            client = LLMClient()
             try:
                 response = await client.chat.completions.create(
                     model=model,

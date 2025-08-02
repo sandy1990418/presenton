@@ -3,8 +3,8 @@ import json
 from typing import Optional
 from pydantic import BaseModel, Field
 
-
-from utils.llm_provider import get_llm_client, get_large_model
+from services.llm_client import LLMClient
+from utils.llm_provider import  get_llm_provider
 
 
 class HeadingDescription(BaseModel):
@@ -54,8 +54,8 @@ class TwoColumnSlideModel(BaseModel):
 
 def test_openai_schema_support():
     response = asyncio.run(
-        get_llm_client().beta.chat.completions.parse(
-            model=get_large_model(),
+        LLMClient().beta.chat.completions.parse(
+            model=get_llm_provider(),
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": "Generate a slide for a presentation"},

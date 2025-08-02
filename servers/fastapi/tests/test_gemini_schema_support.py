@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from google.genai.types import GenerateContentResponse, GenerateContentConfig
 
 
-from utils.llm_provider import get_google_llm_client, get_large_model
+from utils.llm_provider import get_google_llm_client, get_llm_provider
 
 
 class HeadingDescription(BaseModel):
@@ -54,7 +54,7 @@ class TwoColumnSlideModel(BaseModel):
 
 def test_gemini_schema_support():
     response: GenerateContentResponse = get_google_llm_client().models.generate_content(
-        model=get_large_model(),
+        model=get_llm_provider(),
         contents=[
             "Generate a slide for a presentation",
             "The slide should have a title and two contents",

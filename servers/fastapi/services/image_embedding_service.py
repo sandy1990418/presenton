@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 # Try to import optional dependencies with fallbacks
 try:
-    from sentence_transformers import SentenceTransformer
+    # from sentence_transformers import SentenceTransformer
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
@@ -66,7 +66,9 @@ class ImageEmbeddingService:
         """Initialize embedding models using existing OpenAI/Gemini APIs"""
         try:
             # Use existing LLM providers instead of local models
-            from utils.llm_provider import get_llm_client, is_google_selected
+            from services.llm_client import LLMClient
+ 
+            from utils.llm_provider import is_google_selected
             
             if is_google_selected():
                 # Use Google Gemini for embeddings (if available)
@@ -75,7 +77,7 @@ class ImageEmbeddingService:
                 self.model_loaded = True
             else:
                 # Use OpenAI for embeddings
-                self.text_model = get_llm_client()
+                self.text_model =  LLMClient()
                 logger.info("Using OpenAI API for embeddings")
                 self.model_loaded = True
                 

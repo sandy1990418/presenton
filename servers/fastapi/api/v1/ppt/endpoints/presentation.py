@@ -5,7 +5,7 @@ import random
 from typing import Annotated, List, Literal, Optional
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import String, cast, delete
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from constants.documents import UPLOAD_ACCEPTED_FILE_TYPES
@@ -19,7 +19,7 @@ from models.pptx_models import PptxPresentationModel
 from models.presentation_layout import PresentationLayoutModel
 from models.presentation_structure_model import PresentationStructureModel
 from models.presentation_with_slides import PresentationWithSlides
-from services.get_layout_by_name import get_layout_by_name
+from utils.get_layout_by_name import get_layout_by_name
 from services.icon_finder_service import IconFinderService
 from services.image_generation_service import ImageGenerationService
 from utils.dict_utils import deep_update
@@ -39,7 +39,6 @@ from utils.llm_calls.generate_presentation_structure import (
 )
 from utils.llm_calls.generate_slide_content import (
     get_slide_content_from_type_and_outline,
-    get_contextual_slide_content,
 )
 from utils.process_slides import process_slide_and_fetch_assets, convert_file_path_to_web_url
 from utils.randomizers import get_random_uuid
@@ -261,14 +260,12 @@ async def stream_presentation(
             layout = presentation.get_layout()
             outline = presentation.get_presentation_outline()
 
-            # Generate slide content sequentially with context for better continuity
+            # Generate slide content sequentially
             total_slides = len(structure.slides)
-            all_slide_contents = []
-            generated_slides = []  # Track generated slides for context
             
             yield SSEResponse(
                 event="response",
-                data=json.dumps({"type": "status", "status": f"Generating content for {total_slides} slides with context..."}),
+                data=json.dumps({"type": "status", "status": f"Generating content for {total_slides} slides..."}),
             ).to_string()
             
             yield SSEResponse(
@@ -276,7 +273,9 @@ async def stream_presentation(
                 data=json.dumps({"type": "chunk", "chunk": '{ "slides": [ '}),
             ).to_string()
 
-            # Generate slides sequentially to maintain context
+            slides: List[SlideModel] = []
+            async_assets_generation_tasks = []
+            
             for i, slide_layout_index in enumerate(structure.slides):
                 slide_layout = layout.slides[slide_layout_index]
                 
@@ -284,53 +283,11 @@ async def stream_presentation(
                     event="response",
                     data=json.dumps({"type": "status", "status": f"Generating slide {i+1}/{total_slides}..."}),
                 ).to_string()
-                
-                # Use contextual generation for slides after the first one
-                if i == 0:
-                    # First slide uses standard generation
-                    slide_content = await get_slide_content_from_type_and_outline(
-                        slide_layout, outline.slides[i], presentation.language
-                    )
-                else:
-                    # Subsequent slides use contextual generation
-                    slide_content = await get_contextual_slide_content(
-                        slide_layout, outline.slides[i], generated_slides, presentation.language
-                    )
-                
-                all_slide_contents.append(slide_content)
-                
-                # Add to generated slides context for next iteration
-                generated_slides.append({
-                    'title': outline.slides[i].title,
-                    'content': slide_content
-                })
-            
-            yield SSEResponse(
-                event="response",
-                data=json.dumps({"type": "status", "status": f"✅ Generated content for {total_slides} slides, now processing assets..."}),
-            ).to_string()
 
-            # Create slide models with generated content and validate for duplicates
-            slides: List[SlideModel] = []
-            async_assets_generation_tasks = []
-            seen_content_hashes = set()
-            
-            for i, (slide_layout_index, slide_content) in enumerate(zip(structure.slides, all_slide_contents)):
-                slide_layout = layout.slides[slide_layout_index]
-                
-                # Create a simple hash of the slide content to detect duplicates
-                content_str = json.dumps(slide_content, sort_keys=True) if slide_content else ""
-                content_hash = hash(content_str)
-                
-                # If duplicate content detected, add variation
-                if content_hash in seen_content_hashes and slide_content:
-                    print(f"⚠️ Duplicate content detected for slide {i}, adding variation")
-                    if isinstance(slide_content, dict) and "title" in slide_content:
-                        slide_content["title"] = f"{slide_content['title']} (Part {i+1})"
-                        content_hash = hash(json.dumps(slide_content, sort_keys=True))
-                
-                seen_content_hashes.add(content_hash)
-                
+                slide_content = await get_slide_content_from_type_and_outline(
+                    slide_layout, outline.slides[i], presentation.language
+                )
+
                 slide = SlideModel(
                     presentation=presentation_id,
                     layout_group=layout.name,
@@ -352,9 +309,20 @@ async def stream_presentation(
                     data=json.dumps({"type": "chunk", "chunk": slide.model_dump_json()}),
                 ).to_string()
 
+                if i < total_slides - 1:  # Add comma if not last slide
+                    yield SSEResponse(
+                        event="response",
+                        data=json.dumps({"type": "chunk", "chunk": ", "}),
+                    ).to_string()
+
             yield SSEResponse(
                 event="response",
                 data=json.dumps({"type": "chunk", "chunk": " ] }"}),
+            ).to_string()
+
+            yield SSEResponse(
+                event="response",
+                data=json.dumps({"type": "status", "status": "Processing assets..."}),
             ).to_string()
 
             # Process all assets in parallel
@@ -611,7 +579,6 @@ async def from_template(
         new_slide_data = list(filter(lambda x: x.index == each_slide.index, data.data))
         if new_slide_data:
             updated_content = deep_update(each_slide.content, new_slide_data[0].content)
-            print(f"Updated content for slide {each_slide.index}: {updated_content}")
         new_slides.append(
             each_slide.get_new_slide(new_presentation.id, updated_content)
         )
