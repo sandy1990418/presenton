@@ -15,11 +15,10 @@ import {
 } from "@dnd-kit/sortable";
 import { OutlineItem } from "./OutlineItem";
 import { Button } from "@/components/ui/button";
-import { SlideOutline } from "@/store/slices/presentationGeneration";
-import { FileText, Eye, Edit3 } from "lucide-react";
+import { FileText, Edit3, Eye } from "lucide-react";
 
 interface OutlineContentProps {
-    outlines: SlideOutline[] | null;
+    outlines: string[] | null;
     isLoading: boolean;
     isStreaming: boolean;
     onDragEnd: (event: any) => void;
@@ -34,7 +33,7 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
     onAddSlide
 }) => {
     const [viewMode, setViewMode] = useState<'edit' | 'markdown'>('edit');
-    
+   
     const sensors = useSensors(
         useSensor(PointerSensor),
         useSensor(KeyboardSensor, {
@@ -42,7 +41,7 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
         })
     );
 
-    const generateMarkdownPreview = (outlines: SlideOutline[]) => {
+    const generateMarkdownPreview = (outlines: string[]) => {
         if (!outlines || outlines.length === 0) return "";
         
         let markdown = "# Presentation Architecture\n\n";
@@ -51,8 +50,8 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
         
         outlines.forEach((outline, index) => {
             const slideNumber = index + 1;
-            const title = outline.title || `Slide ${slideNumber}`;
-            const body = outline.body || "No content";
+            const title = `Slide ${slideNumber}`;
+            const body = outline || "No content";
             
             // Detect if it's a mermaid slide
             const isMermaidSlide = body.toLowerCase().includes("mermaid") || 
@@ -142,28 +141,28 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
             {/* Outlines content */}
             {outlines && outlines.length > 0 && (
                 <div>
+                    <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={onDragEnd}
+                    >
+                        <SortableContext
+                            items={outlines?.map((item, index) => ({ id: `slide-${index}` })) || []}
+                            strategy={verticalListSortingStrategy}
+                        >
+                            {outlines?.map((item, index) => (
+                                <OutlineItem
+                                    key={`slide-${index}`}
+                                    index={index + 1}
+                                    slideOutline={item}
+                                    isStreaming={isStreaming}
+                                />
+                            ))}
+                        </SortableContext>
+                    </DndContext>
+
                     {viewMode === 'edit' ? (
                         <>
-                            <DndContext
-                                sensors={sensors}
-                                collisionDetection={closestCenter}
-                                onDragEnd={onDragEnd}
-                            >
-                                <SortableContext
-                                    items={outlines?.map((item, index) => ({ id: item.title || `slide-${index}` })) || []}
-                                    strategy={verticalListSortingStrategy}
-                                >
-                                    {outlines?.map((item, index) => (
-                                        <OutlineItem
-                                            key={item.title || `slide-${index}`}
-                                            index={index + 1}
-                                            slideOutline={item}
-                                            isStreaming={isStreaming}
-                                        />
-                                    ))}
-                                </SortableContext>
-                            </DndContext>
-
                             <Button
                                 variant="outline"
                                 onClick={onAddSlide}
@@ -180,7 +179,7 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
                                 <div 
                                     className="markdown-content"
                                     dangerouslySetInnerHTML={{ 
-                                        __html: generateMarkdownPreview(outlines)
+                                        __html: generateMarkdownPreview(outlines || [])
                                             .replace(/\n/g, '<br/>')
                                             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                                             .replace(/^### (.*?)$/gm, '<h3 class="text-lg font-semibold text-gray-800 mt-4 mb-2">$1</h3>')

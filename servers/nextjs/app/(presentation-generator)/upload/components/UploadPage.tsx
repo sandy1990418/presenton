@@ -134,6 +134,7 @@ const UploadPage = () => {
       files: responses,
       webSearchEnabled,
     }));
+    dispatch(clearOutlines());
     router.push("/documents-preview");
   };
 

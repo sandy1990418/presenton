@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.presentation_outline_model import PresentationOutlineModel
 from models.sql.presentation import PresentationModel
 from models.sse_response import SSECompleteResponse, SSEResponse, SSEStatusResponse
+from services import TEMP_FILE_SERVICE
 from services.database import get_async_session
+from services.documents_loader import DocumentsLoader
+from services.score_based_chunker import ScoreBasedChunker
 from utils.llm_calls.generate_presentation_outlines import generate_ppt_outline
 
 OUTLINES_ROUTER = APIRouter(prefix="/outlines", tags=["Outlines"])
@@ -22,99 +25,74 @@ async def stream_outlines(
     if not presentation:
         raise HTTPException(status_code=404, detail="Presentation not found")
 
+    temp_dir = TEMP_FILE_SERVICE.create_temp_dir()
+
     async def inner():
         yield SSEStatusResponse(
             status="Generating presentation outlines..."
         ).to_string()
 
-        presentation_content_text = ""
-        async for chunk in generate_ppt_outline(
-            presentation.prompt,
-            presentation.n_slides,
-            presentation.language,
-            presentation.summary,
-            presentation.web_search_enabled,
-            presentation.id,
-        ):
-            # Give control to the event loop
-            await asyncio.sleep(0)
+        presentation_outlines = None
+        additional_context = ""
+        if presentation.file_paths:
+            documents_loader = DocumentsLoader(file_paths=presentation.file_paths)
+            await documents_loader.load_documents(temp_dir)
+            documents = documents_loader.documents
+            if documents:
+                additional_context = documents[0]
+                chunker = ScoreBasedChunker()
+                try:
+                    chunks = await chunker.get_n_chunks(
+                        documents[0], presentation.n_slides
+                    )
+                    presentation_outlines = PresentationOutlineModel(
+                        slides=[chunk.to_slide_outline() for chunk in chunks]
+                    )
+                except Exception as e:
+                    print(e)
 
-            yield SSEResponse(
-                event="response",
-                data=json.dumps({"type": "chunk", "chunk": chunk}),
-            ).to_string()
-            presentation_content_text += chunk
+        if not presentation_outlines:
+            presentation_outlines_text = ""
+            async for chunk in generate_ppt_outline(
+                presentation.prompt,
+                presentation.n_slides,
+                presentation.language,
+                additional_context,
+            ):
+                # Give control to the event loop
+                await asyncio.sleep(0)
 
-        try:
-            # Clean and validate the accumulated JSON
-            cleaned_content = presentation_content_text.strip()
-            if not cleaned_content:
-                raise ValueError("Empty content received")
-                
-            presentation_content_json = json.loads(cleaned_content)
-            # (f"PARSED JSON: {presentation_content_json}")
-            
-            # Validate required fields
-            if "slides" not in presentation_content_json:
-                raise ValueError("Missing 'slides' field in response")
-                
-            presentation_content = PresentationOutlineModel(**presentation_content_json)
-            
-            # Ensure we don't exceed requested slide count and remove duplicates
-            unique_slides = []
-            seen_titles = set()
-            for slide in presentation_content.slides[:presentation.n_slides]:
-                if slide.title not in seen_titles:
-                    unique_slides.append(slide)
-                    seen_titles.add(slide.title)
-                else:
-                    print(f"⚠️ Duplicate slide title detected and removed: {slide.title}")
+                yield SSEResponse(
+                    event="response",
+                    data=json.dumps({"type": "chunk", "chunk": chunk}),
+                ).to_string()
+                presentation_outlines_text += chunk
 
-            presentation.title = presentation_content.title or f"Presentation - {presentation.prompt[:50]}"
-            presentation.outlines = [slide.model_dump() for slide in unique_slides]
-            presentation.notes = getattr(presentation_content, 'notes', None)
-            
-            # Success! Outlines were parsed and set
-            print(f"✅ Successfully set {len(presentation.outlines)} unique outlines (removed {len(presentation_content.slides) - len(unique_slides)} duplicates)")
-            
-        except (json.JSONDecodeError, ValueError) as e:
-            # If parsing fails, log the error but don't crash the endpoint
-            print(f"⚠️ PARSING FAILED: {e}")
-            print(f"CONTENT LENGTH: {len(presentation_content_text)}")
-            print(f"CONTENT PREVIEW: {presentation_content_text[:500]}...")
-            
-            # Try to extract partial information
-            # if presentation_content_text:
-            #     try:
-            #         # Try to repair incomplete JSON
-            #         from json_repair import repair_json
+            try:
+                presentation_outlines_json = json.loads(presentation_outlines_text)
+            except Exception as e:
+                print(e)
+                raise HTTPException(
+                    status_code=400,
+                    detail="Failed to generate presentation outlines. Please try again.",
+                )
 
-            #         repaired_json = repair_json(presentation_content_text)
-            #         partial_json = json.loads(repaired_json)
-                    
-            #         if "title" in partial_json:
-            #             presentation.title = partial_json["title"]
-            #             print(f"✅ EXTRACTED TITLE: {presentation.title}")
-                    
-            #         if "slides" in partial_json and isinstance(partial_json["slides"], list):
-            #             # Create fallback slides from partial data
-            #             presentation.outlines = []
-            #             for slide_data in partial_json["slides"][:presentation.n_slides]:
-            #                 if isinstance(slide_data, dict) and "title" in slide_data:
-            #                     presentation.outlines.append(slide_data)
-            #             print(f"✅ EXTRACTED {len(presentation.outlines)} PARTIAL SLIDES")
-            #     except Exception as repair_error:
-            #         print(f"⚠️ JSON repair also failed: {repair_error}")
-                    
-            # # Set fallback values if nothing was extracted
-            # if not presentation.title:
-            #     presentation.title = f"Presentation - {presentation.prompt[:50]}"
-            # if not presentation.outlines:
-            #     presentation.outlines = []
-        presentation.title = presentation_content.title
-        presentation.outlines = [
-            each.model_dump() for each in presentation_content.slides
+            presentation_outlines = PresentationOutlineModel(
+                **presentation_outlines_json
+            )
+
+        presentation_outlines.slides = presentation_outlines.slides[
+            : presentation.n_slides
         ]
+
+        presentation.outlines = presentation_outlines.model_dump()
+        presentation.title = (
+            presentation_outlines.slides[0][:50]
+            .replace("#", "")
+            .replace("/", "")
+            .replace("\\", "")
+            .replace("\n", "")
+        )
 
         sql_session.add(presentation)
         await sql_session.commit()

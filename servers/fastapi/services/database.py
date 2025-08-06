@@ -8,6 +8,11 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlmodel import SQLModel
 
+from models.sql.image_asset import ImageAsset
+from models.sql.key_value import KeyValueSqlModel
+from models.sql.ollama_pull_status import OllamaPullStatus
+from models.sql.presentation import PresentationModel
+from models.sql.slide import SlideModel
 from utils.get_env import get_app_data_directory_env, get_database_url_env
 
 
@@ -37,6 +42,43 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+# Container DB (Lives inside the container)
+container_db_path = os.path.join(
+    get_app_data_directory_env() or "/tmp/presenton", "container.db"
+)
+container_db_url = f"sqlite+aiosqlite:///{container_db_path}"
+container_db_engine: AsyncEngine = create_async_engine(
+    container_db_url, connect_args={"check_same_thread": False}
+)
+container_db_async_session_maker = async_sessionmaker(
+    container_db_engine, expire_on_commit=False
+)
+
+
+async def get_container_db_async_session() -> AsyncGenerator[AsyncSession, None]:
+    async with container_db_async_session_maker() as session:
+        yield session
+
+
+# Create Database and Tables
 async def create_db_and_tables():
     async with sql_engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(
+            lambda sync_conn: SQLModel.metadata.create_all(
+                sync_conn,
+                tables=[
+                    PresentationModel.__table__,
+                    SlideModel.__table__,
+                    KeyValueSqlModel.__table__,
+                    ImageAsset.__table__,
+                ],
+            )
+        )
+
+    async with container_db_engine.begin() as conn:
+        await conn.run_sync(
+            lambda sync_conn: SQLModel.metadata.create_all(
+                sync_conn,
+                tables=[OllamaPullStatus.__table__],
+            )
+        )

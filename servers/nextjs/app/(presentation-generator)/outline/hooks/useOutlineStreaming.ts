@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { toast } from "sonner";
-import { setOutlines, SlideOutline } from "@/store/slices/presentationGeneration";
+import { setOutlines } from "@/store/slices/presentationGeneration";
 import { jsonrepair } from "jsonrepair";
 import { StreamState } from "../types/index";
 import { RootState } from "@/store/store";
@@ -55,9 +55,7 @@ export const useOutlineStreaming = (presentationId: string | null) => {
 
             case "complete":
               try {
-                console.log("Complete event received:", data);
-                const outlinesData: SlideOutline[] = data.presentation.outlines;
-                console.log("Outlines data:", outlinesData);
+                const outlinesData: string[] = data.presentation.outlines.slides;
                 dispatch(setOutlines(outlinesData));
                 setStreamState({ isStreaming: false, isLoading: false });
                 eventSource.close();
@@ -94,11 +92,11 @@ export const useOutlineStreaming = (presentationId: string | null) => {
       } catch (error) {
         setStreamState({ isStreaming: false, isLoading: false });
         toast.error("Failed to initialize connection");
+      }finally{
+        setStreamState({ isStreaming: false, isLoading: false });
       }
     };
-
-    initializeStream();
-
+      initializeStream();
     return () => {
       if (eventSource) {
         eventSource.close();

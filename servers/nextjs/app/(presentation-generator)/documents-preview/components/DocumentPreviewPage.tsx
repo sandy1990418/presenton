@@ -27,8 +27,7 @@ import MarkdownRenderer from "./MarkdownRenderer";
 import { getIconFromFile } from "../../utils/others";
 import { ChevronRight, PanelRightOpen, X } from "lucide-react";
 import ToolTip from "@/components/ToolTip";
-import Header from "@/app/dashboard/components/Header";
-import ImageExtractionProcessor from "@/components/ImageExtractionProcessor";
+import Header from "@/app/(presentation-generator)/dashboard/components/Header";
 
 // Types
 interface LoadingState {
@@ -153,7 +152,7 @@ const DocumentsPreviewPage: React.FC = () => {
       });
 
       dispatch(setPresentationId(createResponse.id));
-      router.push("/outline");
+      router.replace("/outline");
     } catch (error: any) {
       console.error("Error in radar presentation creation:", error);
       toast.error('Error', {
@@ -212,7 +211,7 @@ const DocumentsPreviewPage: React.FC = () => {
 
     return (
       <div className={`border-r border-gray-200 fixed xl:relative w-full z-50 xl:z-auto
-        transition-all duration-300 ease-in-out max-w-[200px] md:max-w-[300px] h-[85vh] rounded-md p-5`}>
+        transition-all duration-300 bg-white ease-in-out max-w-[200px] md:max-w-[300px] h-[85vh] rounded-md p-5`}>
         <X
           onClick={() => setIsOpen(false)}
           className="text-black mb-4 ml-auto mr-0 cursor-pointer hover:text-gray-600"

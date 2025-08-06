@@ -32,7 +32,6 @@ const OutlinePage: React.FC = () => {
     selectedLayoutGroup,
     setActiveTab
   );
-
   if (!presentation_id) {
     return <EmptyStateView />;
   }
@@ -86,7 +85,6 @@ const OutlinePage: React.FC = () => {
             <GenerateButton
               loadingState={loadingState}
               streamState={streamState}
-              outlines={outlines}
               selectedLayoutGroup={selectedLayoutGroup}
               onSubmit={handleSubmit}
             />
