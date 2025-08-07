@@ -134,7 +134,7 @@ const UploadPage = () => {
       files: responses,
       webSearchEnabled,
     }));
-    dispatch(clearOutlines());
+    dispatch(clearOutlines())
     router.push("/documents-preview");
   };
 
@@ -159,7 +159,7 @@ const UploadPage = () => {
     });
 
     dispatch(setPresentationId(createResponse.id));
-    dispatch(clearOutlines());
+    dispatch(clearOutlines())
     router.push("/outline");
   };
 

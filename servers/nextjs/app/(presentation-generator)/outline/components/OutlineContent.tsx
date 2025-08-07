@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { FileText, Edit3, Eye } from "lucide-react";
 
 interface OutlineContentProps {
-    outlines: string[] | null;
+    outlines: { content: string }[] | null;
     isLoading: boolean;
     isStreaming: boolean;
     onDragEnd: (event: any) => void;
@@ -33,7 +33,7 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
     onAddSlide
 }) => {
     const [viewMode, setViewMode] = useState<'edit' | 'markdown'>('edit');
-   
+    console.log('isLoading', isLoading)
     const sensors = useSensors(
         useSensor(PointerSensor),
         useSensor(KeyboardSensor, {
@@ -41,7 +41,7 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
         })
     );
 
-    const generateMarkdownPreview = (outlines: string[]) => {
+    const generateMarkdownPreview = (outlines: { content: string }[]) => {
         if (!outlines || outlines.length === 0) return "";
         
         let markdown = "# Presentation Architecture\n\n";
@@ -51,7 +51,7 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
         outlines.forEach((outline, index) => {
             const slideNumber = index + 1;
             const title = `Slide ${slideNumber}`;
-            const body = outline || "No content";
+            const body = outline.content || "No content";
             
             // Detect if it's a mermaid slide
             const isMermaidSlide = body.toLowerCase().includes("mermaid") || 
@@ -146,7 +146,18 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
                         collisionDetection={closestCenter}
                         onDragEnd={onDragEnd}
                     >
-                        <SortableContext
+                        {isStreaming ? (
+
+                           outlines.map((item, index) => (
+                            <OutlineItem
+                                key={`slide-${index}`}
+                                index={index + 1}
+                                slideOutline={item}
+                                isStreaming={isStreaming}
+                            />
+                        ))
+                        ) :
+                            <SortableContext
                             items={outlines?.map((item, index) => ({ id: `slide-${index}` })) || []}
                             strategy={verticalListSortingStrategy}
                         >
@@ -158,7 +169,7 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
                                     isStreaming={isStreaming}
                                 />
                             ))}
-                        </SortableContext>
+                        </SortableContext>}
                     </DndContext>
 
                     {viewMode === 'edit' ? (

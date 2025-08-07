@@ -11,7 +11,10 @@ from sqlmodel import select
 from constants.documents import UPLOAD_ACCEPTED_FILE_TYPES
 from models.presentation_and_path import PresentationPathAndEditPath
 from models.presentation_from_template import GetPresentationUsingTemplateRequest
-from models.presentation_outline_model import PresentationOutlineModel
+from models.presentation_outline_model import (
+    PresentationOutlineModel,
+    SlideOutlineModel,
+)
 from models.pptx_models import PptxPresentationModel
 from models.presentation_layout import PresentationLayoutModel
 from models.presentation_structure_model import PresentationStructureModel
@@ -163,7 +166,7 @@ async def create_presentation(
 @PRESENTATION_ROUTER.post("/prepare", response_model=PresentationModel)
 async def prepare_presentation(
     presentation_id: Annotated[str, Body()],
-    outlines: Annotated[List[str], Body()],
+    outlines: Annotated[List[SlideOutlineModel], Body()],
     layout: Annotated[PresentationLayoutModel, Body()],
     title: Annotated[Optional[str], Body()] = None,
     sql_session: AsyncSession = Depends(get_async_session),
@@ -198,7 +201,9 @@ async def prepare_presentation(
             presentation_structure.slides[index] = random_slide_index
 
     sql_session.add(presentation)
-    presentation.outlines = PresentationOutlineModel(slides=outlines).model_dump()
+    presentation.outlines = PresentationOutlineModel(slides=outlines).model_dump(
+        mode="json"
+    )
     presentation.title = title or presentation.title
     presentation.set_layout(layout)
     presentation.set_structure(presentation_structure)
@@ -357,12 +362,17 @@ async def update_presentation(
     presentation_with_slides: Annotated[PresentationWithSlides, Body()],
     sql_session: AsyncSession = Depends(get_async_session),
 ):
-    updated_presentation = presentation_with_slides.to_presentation_model()
-    updated_slides = presentation_with_slides.slides
-    presentation = await sql_session.get(PresentationModel, updated_presentation.id)
-    if not presentation:
-        raise HTTPException(status_code=404, detail="Presentation not found")
-    presentation.sqlmodel_update(updated_presentation)
+    try:
+        updated_presentation = presentation_with_slides.to_presentation_model()
+        updated_slides = presentation_with_slides.slides
+        presentation = await sql_session.get(PresentationModel, updated_presentation.id)
+        if not presentation:
+            raise HTTPException(status_code=404, detail="Presentation not found")
+        presentation.sqlmodel_update(updated_presentation)
+    except Exception as e:
+        print(f"❌ Error in update_presentation: {str(e)}")
+        print(f"📋 Request data keys: {list(presentation_with_slides.model_dump().keys()) if hasattr(presentation_with_slides, 'model_dump') else 'Invalid object'}")
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
 
     await sql_session.execute(
         delete(SlideModel).where(SlideModel.presentation == updated_presentation.id)

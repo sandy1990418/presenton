@@ -57,9 +57,9 @@ class DocumentsLoader:
             elif mime_type in TEXT_MIME_TYPES:
                 document = await self.load_text(file_path)
             elif mime_type in POWERPOINT_TYPES:
-                document = self.load_powerpoint(file_path)
+                document = await asyncio.to_thread(self.load_powerpoint, file_path)
             elif mime_type in WORD_TYPES:
-                document = self.load_msword(file_path)
+                document = await asyncio.to_thread(self.load_msword, file_path)
 
             documents.append(document)
             images.append(imgs)
@@ -78,7 +78,7 @@ class DocumentsLoader:
         document: str = ""
 
         if load_text:
-            document = self.docling_service.parse_to_markdown(file_path)
+            document = await asyncio.to_thread(self.docling_service.parse_to_markdown, file_path)
 
         if load_images:
             image_paths = await self.get_page_images_from_pdf_async(file_path, temp_dir)
@@ -86,8 +86,10 @@ class DocumentsLoader:
         return document, image_paths
 
     async def load_text(self, file_path: str) -> str:
-        with open(file_path, "r") as file:
-            return await asyncio.to_thread(file.read)
+        def _read_file():
+            with open(file_path, "r") as file:
+                return file.read()
+        return await asyncio.to_thread(_read_file)
 
     def load_msword(self, file_path: str) -> str:
         return self.docling_service.parse_to_markdown(file_path)

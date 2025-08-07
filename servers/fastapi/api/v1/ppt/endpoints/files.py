@@ -1,3 +1,4 @@
+import asyncio
 from http.client import HTTPException
 import os
 from typing import Annotated, List, Optional
@@ -59,8 +60,10 @@ async def decompose_files(file_paths: Annotated[List[str], Body(embed=True)]):
             f"{get_random_uuid()}.txt", temp_dir
         )
         parsed_doc = parsed_doc.replace("<br>", "\n")
-        with open(file_path, "w") as text_file:
-            text_file.write(parsed_doc)
+        def _write_file():
+            with open(file_path, "w") as text_file:
+                text_file.write(parsed_doc)
+        await asyncio.to_thread(_write_file)
         response.append(
             DecomposedFileInfo(
                 name=os.path.basename(other_files[index]), file_path=file_path
