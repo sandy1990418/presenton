@@ -1,8 +1,5 @@
 import React from "react";
-import EditableText from "../EditableText";
-import { useSelector } from "react-redux";
-import { RootState } from "@/store/store";
-import SlideFooter from "./SlideFooter";
+import TiptapText from "../TiptapText";
 
 export interface FlowchartNode {
   id: string;
@@ -18,8 +15,8 @@ export interface FlowchartNode {
 
 export interface FlowchartConnection {
   id: string;
-  from_node: string;
-  to_node: string;
+  from: string;
+  to: string;
   label?: string;
   style?: "solid" | "dashed" | "dotted";
 }
@@ -44,7 +41,12 @@ const Type10Layout = ({
   flowchartData,
   body,
 }: Type10LayoutProps) => {
-  const { currentColors } = useSelector((state: RootState) => state.theme);
+  // Default colors for flowchart elements
+  const currentColors = {
+    iconBg: "#3b82f6",
+    slideTitle: "#374151",
+    slideDescription: "#6b7280"
+  };
 
   // Default flowchart data if none provided
   const defaultFlowchartData: FlowchartData = {
@@ -95,9 +97,9 @@ const Type10Layout = ({
       },
     ],
     connections: [
-      { id: "conn1", from_node: "start", to_node: "process1" },
-      { id: "conn2", from_node: "process1", to_node: "decision" },
-      { id: "conn3", from_node: "decision", to_node: "end", label: "Yes" },
+      { id: "conn1", from: "start", to: "process1" },
+      { id: "conn2", from: "process1", to: "decision" },
+      { id: "conn3", from: "decision", to: "end", label: "Yes" },
     ],
   };
 
@@ -235,29 +237,25 @@ const Type10Layout = ({
       data-element-type="slide-container"
       data-element-id={`slide-${slideIndex}-container`}
       style={{
-        fontFamily: currentColors.fontFamily || "Inter, sans-serif",
+        fontFamily: "Inter, sans-serif",
       }}
     >
       {/* Title */}
       <div className="w-full text-center mb-6">
-        <EditableText
-          slideIndex={slideIndex}
-          elementId={`slide-${slideIndex}-title`}
-          type="title"
+        <TiptapText
           content={title}
-          isAlingCenter={true}
+          className="text-2xl font-bold text-center"
+          placeholder="Enter slide title..."
         />
       </div>
 
       {/* Body Text (if provided) */}
       {body && (
         <div className="w-full text-center mb-4">
-          <EditableText
-            slideIndex={slideIndex}
-            elementId={`slide-${slideIndex}-body`}
-            type="body"
+          <TiptapText
             content={body}
-            isAlingCenter={true}
+            className="text-base text-center"
+            placeholder="Enter body text..."
           />
         </div>
       )}
@@ -273,10 +271,10 @@ const Type10Layout = ({
           {/* Render connections first (so they appear behind nodes) */}
           {currentFlowchartData.connections.map((connection) => {
             const fromNode = currentFlowchartData.nodes.find(
-              (node) => node.id === connection.from_node
+              (node) => node.id === connection.from
             );
             const toNode = currentFlowchartData.nodes.find(
-              (node) => node.id === connection.to_node
+              (node) => node.id === connection.to
             );
 
             if (!fromNode || !toNode) return null;
@@ -332,7 +330,6 @@ const Type10Layout = ({
         </svg>
       </div>
 
-      <SlideFooter />
     </div>
   );
 };

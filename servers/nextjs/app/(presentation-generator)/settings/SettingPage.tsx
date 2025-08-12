@@ -27,13 +27,15 @@ interface ButtonState {
 const SettingsPage = () => {
   const router = useRouter();
   const userConfigState = useSelector((state: RootState) => state.userConfig);
-  const [llmConfig, setLlmConfig] = useState<LLMConfig>(userConfigState.llm_config);
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>(
+    userConfigState.llm_config
+  );
   const canChangeKeys = userConfigState.can_change_keys;
   const [buttonState, setButtonState] = useState<ButtonState>({
     isLoading: false,
     isDisabled: false,
     text: "Save Configuration",
-    showProgress: false
+    showProgress: false,
   });
 
   const [downloadingModel, setDownloadingModel] = useState<{
@@ -46,8 +48,14 @@ const SettingsPage = () => {
   const [showDownloadModal, setShowDownloadModal] = useState<boolean>(false);
 
   const downloadProgress = React.useMemo(() => {
-    if (downloadingModel && downloadingModel.downloaded !== null && downloadingModel.size !== null) {
-      return Math.round((downloadingModel.downloaded / downloadingModel.size) * 100);
+    if (
+      downloadingModel &&
+      downloadingModel.downloaded !== null &&
+      downloadingModel.size !== null
+    ) {
+      return Math.round(
+        (downloadingModel.downloaded / downloadingModel.size) * 100
+      );
     }
     return 0;
   }, [downloadingModel?.downloaded, downloadingModel?.size]);
@@ -58,11 +66,13 @@ const SettingsPage = () => {
         ...prev,
         isLoading: true,
         isDisabled: true,
-        text: "Saving Configuration..."
+        text: "Saving Configuration...",
       }));
       await handleSaveLLMConfig(llmConfig);
       if (llmConfig.LLM === "ollama" && llmConfig.OLLAMA_MODEL) {
-        const isPulled = await checkIfSelectedOllamaModelIsPulled(llmConfig.OLLAMA_MODEL);
+        const isPulled = await checkIfSelectedOllamaModelIsPulled(
+          llmConfig.OLLAMA_MODEL
+        );
         if (!isPulled) {
           setShowDownloadModal(true);
           await handleModelDownload();
@@ -73,7 +83,7 @@ const SettingsPage = () => {
         ...prev,
         isLoading: false,
         isDisabled: false,
-        text: "Save Configuration"
+        text: "Save Configuration",
       }));
       router.push("/upload");
     } catch (error) {
@@ -82,7 +92,7 @@ const SettingsPage = () => {
         ...prev,
         isLoading: false,
         isDisabled: false,
-        text: "Save Configuration"
+        text: "Save Configuration",
       }));
     }
   };
@@ -98,15 +108,21 @@ const SettingsPage = () => {
   };
 
   useEffect(() => {
-    if (downloadingModel && downloadingModel.downloaded !== null && downloadingModel.size !== null) {
-      const percentage = Math.round(((downloadingModel.downloaded / downloadingModel.size) * 100));
+    if (
+      downloadingModel &&
+      downloadingModel.downloaded !== null &&
+      downloadingModel.size !== null
+    ) {
+      const percentage = Math.round(
+        (downloadingModel.downloaded / downloadingModel.size) * 100
+      );
       setButtonState({
         isLoading: true,
         isDisabled: true,
         text: `Downloading Model (${percentage}%)`,
         showProgress: true,
         progressPercentage: percentage,
-        status: downloadingModel.status
+        status: downloadingModel.status,
       });
     }
 
@@ -150,10 +166,11 @@ const SettingsPage = () => {
           <button
             onClick={handleSaveConfig}
             disabled={buttonState.isDisabled}
-            className={`w-full font-semibold py-3 px-4 rounded-lg transition-all duration-500 ${buttonState.isDisabled
-              ? "bg-gray-400 cursor-not-allowed"
-              : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:ring-4 focus:ring-blue-200"
-              } text-white`}
+            className={`w-full font-semibold py-3 px-4 rounded-lg transition-all duration-500 ${
+              buttonState.isDisabled
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:ring-4 focus:ring-blue-200"
+            } text-white`}
           >
             {buttonState.isLoading ? (
               <div className="flex items-center justify-center gap-2">
@@ -184,7 +201,9 @@ const SettingsPage = () => {
 
               {/* Title */}
               <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                {downloadingModel.done ? "Download Complete!" : "Downloading Model"}
+                {downloadingModel.done
+                  ? "Download Complete!"
+                  : "Downloading Model"}
               </h3>
 
               {/* Model Name */}
@@ -218,20 +237,31 @@ const SettingsPage = () => {
               )}
 
               {/* Status Message */}
-              {downloadingModel.status && downloadingModel.status !== "pulled" && (
-                <div className="text-xs text-gray-500">
-                  {downloadingModel.status === "downloading" && "Downloading model files..."}
-                  {downloadingModel.status === "verifying" && "Verifying model integrity..."}
-                  {downloadingModel.status === "pulling" && "Pulling model from registry..."}
-                </div>
-              )}
+              {downloadingModel.status &&
+                downloadingModel.status !== "pulled" && (
+                  <div className="text-xs text-gray-500">
+                    {downloadingModel.status === "downloading" &&
+                      "Downloading model files..."}
+                    {downloadingModel.status === "verifying" &&
+                      "Verifying model integrity..."}
+                    {downloadingModel.status === "pulling" &&
+                      "Pulling model from registry..."}
+                  </div>
+                )}
 
               {/* Download Info */}
               {downloadingModel.downloaded && downloadingModel.size && (
                 <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                   <div className="flex justify-between text-xs text-gray-600">
-                    <span>Downloaded: {(downloadingModel.downloaded / 1024 / 1024).toFixed(1)} MB</span>
-                    <span>Total: {(downloadingModel.size / 1024 / 1024).toFixed(1)} MB</span>
+                    <span>
+                      Downloaded:{" "}
+                      {(downloadingModel.downloaded / 1024 / 1024).toFixed(1)}{" "}
+                      MB
+                    </span>
+                    <span>
+                      Total: {(downloadingModel.size / 1024 / 1024).toFixed(1)}{" "}
+                      MB
+                    </span>
                   </div>
                 </div>
               )}

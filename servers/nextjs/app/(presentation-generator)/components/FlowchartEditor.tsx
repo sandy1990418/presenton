@@ -33,7 +33,12 @@ const FlowchartEditor: React.FC<FlowchartEditorProps> = ({
   flowchartData,
 }) => {
   const dispatch = useDispatch();
-  const { currentColors } = useSelector((state: RootState) => state.theme);
+  
+  // Default colors for flowchart elements
+  const currentColors = {
+    iconBg: "#3b82f6",
+    slideTitle: "#374151"
+  };
   const [currentTool, setCurrentTool] = useState<Tool>("select");
   const [nodes, setNodes] = useState<FlowchartNode[]>(flowchartData.nodes);
   const [connections, setConnections] = useState<FlowchartConnection[]>(flowchartData.connections);

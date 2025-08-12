@@ -2,7 +2,8 @@ import logging
 import asyncio
 from typing import Optional
 
-from models.llm_message import LLMMessage
+from models.llm_message import LLMSystemMessage, LLMUserMessage
+from models.llm_tools import GetCurrentDatetimeTool, SearchWebTool
 from services.llm_client import LLMClient
 from utils.get_dynamic_models import get_presentation_outline_model_with_n_slides
 from utils.llm_provider import get_model
@@ -72,6 +73,7 @@ system_prompt = """
     - Make sure that flow of the presentation is logical and consistent.
     - Place greater emphasis on numerical data.
     - If Additional Information is provided, divide it into slides.
+    - Make sure no images are provided in the content.
     - Make sure that content follows language guidelines.
 """
 
@@ -88,12 +90,10 @@ def get_user_prompt(prompt: str, n_slides: int, language: str, content: str):
 
 def get_messages(prompt: str, n_slides: int, language: str, content: str):
     return [
-        LLMMessage(
-            role="system",
+        LLMSystemMessage(
             content=system_prompt,
         ),
-        LLMMessage(
-            role="user",
+        LLMUserMessage(
             content=get_user_prompt(prompt, n_slides, language, content),
         ),
     ]
@@ -295,10 +295,13 @@ async def generate_ppt_outline(
     #             yield json.dumps(fallback_outline)
     client = LLMClient()
 
+    tools = [SearchWebTool, GetCurrentDatetimeTool]
+
     async for chunk in client.stream_structured(
         model,
         get_messages(prompt, n_slides, language, content),
         response_model.model_json_schema(),
         strict=True,
+        tools=tools if client.enable_web_grounding() else None,
     ):
         yield chunk

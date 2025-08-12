@@ -3,7 +3,12 @@ FROM python:3.11-slim-bookworm
 # Install Node.js and npm
 RUN apt-get update && apt-get install -y \
   nginx \
-  curl 
+  curl \
+  libreoffice \
+  fontconfig \
+  imagemagick
+
+RUN sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml
 
 
 # Install Node.js 20 using NodeSource repository
@@ -33,7 +38,7 @@ RUN pip install docling --extra-index-url https://download.pytorch.org/whl/cpu
 # Install dependencies for Next.js
 WORKDIR /node_dependencies
 COPY servers/nextjs/package.json servers/nextjs/package-lock.json ./
-RUN npm install
+RUN npm install --verbose
 
 # Install chrome for puppeteer
 RUN npx puppeteer browsers install chrome@138.0.7204.94 --install-deps

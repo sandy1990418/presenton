@@ -24,3 +24,8 @@ servers/fastapi/data
 servers/fastapi/example_web_search_usage.py
 servers/fastapi/tests
 servers/fastapi/nltk/
+
+nltk
+chroma
+container.db
+.next-build

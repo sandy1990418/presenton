@@ -1,5 +1,5 @@
 "use client";
-import React, { useCallback, useState } from "react";
+import React, {  useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,8 +18,9 @@ import {
 } from "../hooks";
 import { PresentationPageProps } from "../types";
 import LoadingState from "./LoadingState";
+import { useLayout } from "../../context/LayoutContext";
+import { useFontLoader } from "../../hooks/useFontLoader";
 import CitationFooter from "./CitationFooter";
-
 const PresentationPage: React.FC<PresentationPageProps> = ({
   presentation_id,
 }) => {
@@ -29,7 +30,8 @@ const PresentationPage: React.FC<PresentationPageProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState(false);
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
-
+  const {getCustomTemplateFonts} = useLayout();
+ 
   const { presentationData, isStreaming } = useSelector(
     (state: RootState) => state.presentationGeneration
   );
@@ -64,7 +66,7 @@ const PresentationPage: React.FC<PresentationPageProps> = ({
   // Initialize streaming
   usePresentationStreaming(
     presentation_id,
-    stream,
+    stream || null,
     setLoading,
     setError,
     fetchUserSlides
@@ -74,6 +76,15 @@ const PresentationPage: React.FC<PresentationPageProps> = ({
     handleSlideChange(newSlide, presentationData);
   };
 
+
+  useEffect(() => {
+    if(!loading && !isStreaming && presentationData?.slides && presentationData?.slides.length > 0){  
+      const presentation_id = presentationData?.slides[0].layout.split(":")[0].split("custom-")[1];
+    const fonts = getCustomTemplateFonts(presentation_id);
+  
+    useFontLoader(fonts || []);
+  }
+  }, [presentationData,loading,isStreaming]);
   // Presentation Mode View
   if (isPresentMode) {
     return (

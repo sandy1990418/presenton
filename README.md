@@ -35,7 +35,8 @@
 
 Presenton gives you complete control over your AI presentation workflow. Choose your models, customize your experience, and keep your data private.
 
-* ✅ **Custom Layouts & Themes** — Create unlimited presentation designs with HTML and Tailwind CSS
+* ✅ **Custom Templates & Themes** — Create unlimited presentation designs with HTML and Tailwind CSS
+* ✅ **AI Template Generation** — Create presentation templates from existing Powerpoint documents.
 * ✅ **Flexible Generation** — Build presentations from prompts or uploaded documents
 * ✅ **Export Ready** — Save as PowerPoint (PPTX) and PDF with professional formatting
 * ✅ **Bring Your Own Key** — Use your own API keys for OpenAI, Google Gemini, Anthropic Claude, or any compatible provider. Only pay for what you use, no hidden fees or subscriptions.
@@ -91,6 +92,7 @@ You may want to directly provide your API KEYS as environment variables and keep
 - **CUSTOM_MODEL=[Custom Model ID]**: Provide this if **LLM** is set to **custom**
 - **TOOL_CALLS=[Enable/Disable Tool Calls on Custom LLM]**: If **true**, **LLM** will use Tool Call instead of Json Schema for Structured Output.
 - **DISABLE_THINKING=[Enable/Disable Thinking on Custom LLM]**: If **true**, Thinking will be disabled.
+- **WEB_GROUNDING=[Enable/Disable Web Search for OpenAI, Google And Anthropic]**: If **true**, LLM will be able to search web for better results.
 
 You can also set the following environment variables to customize the image generation provider and API keys:
 
@@ -159,7 +161,7 @@ Content-Type: `multipart/form-data`
 | prompt | string | Yes | The main topic or prompt for generating the presentation |
 | n_slides | integer | No | Number of slides to generate (default: 8, min: 5, max: 15) |
 | language | string | No | Language for the presentation (default: "English") |
-| layout | string | No | Presentation theme (default: "general"). Available options: "classic", "general", "modern", "professional" + Custom layouts |
+| template | string | No | Presentation template (default: "general"). Available options: "classic", "general", "modern", "professional" + Custom templates |
 | documents | File[] | No | Optional list of document files to include in the presentation. Supported file types: PDF, TXT, PPTX, DOCX |
 | export_as | string | No | Export format ("pptx" or "pdf", default: "pptx") |
 
@@ -180,7 +182,7 @@ curl -X POST http://localhost:5000/api/v1/ppt/presentation/generate \
   -F "prompt=Introduction to Machine Learning" \
   -F "n_slides=5" \
   -F "language=English" \
-  -F "layout=general" \
+  -F "template=general" \
   -F "export_as=pptx"
 ```
 
@@ -202,75 +204,6 @@ For detailed info checkout [API documentation](https://docs.presenton.ai/using-p
 - [Generate Presentations via API in 5 minutes](https://docs.presenton.ai/tutorial/generate-presentation-over-api)
 - [Create Presentations from CSV using AI](https://docs.presenton.ai/tutorial/generate-presentation-from-csv)
 - [Create Data Reports Using AI](https://docs.presenton.ai/tutorial/create-data-reports-using-ai)
-
-## 🏗️ MCP Architecture Overview
-
-![Demo](readme_assets/mcpdemo.gif)
-
-Presenton is built on a modular architecture featuring a FastAPI backend and a Next.js frontend. At its core is the **MCP (Model Context Protocol) server**, which orchestrates the entire presentation generation workflow using a robust state machine. This architecture ensures flexibility, reliability, and extensibility.
-
-### MCP Workflow Highlights
-
-- **Session Management:** Each presentation runs in its own session for isolation and tracking.
-- **Outline Generation:** Automatically creates outlines, with or without input files.
-- **Layout Selection:** Choose from built-in or custom layouts.
-- **Content & Asset Generation:** Generates slide text, images, and icons using your selected AI models.
-- **Export Options:** Seamlessly export presentations as PDF or PPTX files.
-
-All workflow logic and tool APIs are organized in the `app_mcp` package. The orchestrator handles state transitions and error management, making it easy to extend or customize.
-
-#### Key Files & Directories
-
-- `.vscode/mcp.json`: VS Code integration and MCP server configuration.
-- `servers/fastapi/app_mcp/`: Backend workflow logic and tool registration.
-
----
-
-## ⚡ Quick Start: VS Code Integration
-
-1. **Configure MCP:** Make sure `.vscode/mcp.json` points to your running MCP server (see example below).
-2. **Start a Presentation:** Use the VS Code command palette or chat to run `start_presentation` with your topic.
-3. **Advance Workflow:** Use `continue_workflow` to progress through outline, layout, and slide generation steps.
-4. **Export:** Use `export_presentation` to download your presentation as PDF or PPTX.
-5. **Check Progress:** Use `get_status` at any time to view your workflow status.
-
-#### Example `.vscode/mcp.json`
-```jsonc
-{
-  "servers": {
-    "my-mcp-server-5f58fb2c": {
-      "url": "http://localhost:5000/mcp/",
-      "type": "http"
-    }
-  },
-  "inputs": []
-}
-```
-
----
-
-### 🗣️ Using Chat Commands in VS Code
-
-You can interact with Presenton directly from the VS Code chat window:
-
-- **Step-by-step Workflow:**  
-  Type a prompt like:
-  ```plaintext
-  I want to create a presentation on "Artificial Intelligence in Healthcare". Can you please show me the step by step and verify things to me so that I can be sure that the presentation is good?
-  ```
-
-- **Direct Commands:**  
-  For a faster workflow, use direct commands such as:
-  ```plaintext
-  Start a presentation on "Artificial Intelligence in Healthcare" with general layout and 10 slides.
-  ```
-
-This integration gives you full control—whether you want a guided, step-by-step experience or prefer to automate the entire process with a single command.
-
----
-
-
-
 
 ## Roadmap
 - [x] Support for custom HTML templates by developers

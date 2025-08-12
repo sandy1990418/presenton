@@ -42,9 +42,32 @@ export const useAutoSave = ({
             try {
                 setIsSaving(true);
                 console.log('🔄 Auto-saving presentation data...');
+                console.log('📊 Original data structure:', JSON.stringify(data, null, 2));
+
+                // Transform data to match backend PresentationWithSlides model
+                const transformedData = {
+                    id: data.id,
+                    prompt: data.prompt || "", // Default empty string if missing
+                    n_slides: data.n_slides,
+                    language: data.language,
+                    title: data.title,
+                    outlines: data.outlines || null,
+                    created_at: data.created_at || new Date().toISOString(),
+                    updated_at: new Date().toISOString(), // Always update timestamp
+                    layout: data.layout,
+                    structure: data.structure || null,
+                    slides: (data.slides || []).map((slide: any) => ({
+                        ...slide,
+                        speaker_note: slide.speaker_note || slide.content?.__speaker_note__ || "",
+                        html_content: slide.html_content || null,
+                        properties: slide.properties || null
+                    }))
+                };
+
+                console.log('🔧 Transformed data structure:', JSON.stringify(transformedData, null, 2));
 
                 // Call the API to update presentation content
-                await PresentationGenerationApi.updatePresentationContent(data);
+                await PresentationGenerationApi.updatePresentationContent(transformedData);
 
                 // Update last saved data reference
                 lastSavedDataRef.current = currentDataString;

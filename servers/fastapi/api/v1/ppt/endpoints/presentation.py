@@ -286,6 +286,7 @@ async def stream_presentation(
                     layout_group=layout.name,
                     layout=slide_layout.id,
                     index=i,
+                    speaker_note=slide_content.get("__speaker_note__", ""),
                     content=slide_content,
                 )
                 slides.append(slide)
@@ -412,7 +413,7 @@ async def generate_presentation_api(
     prompt: Annotated[str, Body()],
     n_slides: Annotated[int, Body()] = 8,
     language: Annotated[str, Body()] = "English",
-    layout: Annotated[str, Body()] = "general",
+    template: Annotated[str, Body()] = "general",
     files: Annotated[Optional[List[UploadFile]], File()] = None,
     export_as: Annotated[Literal["pptx", "pdf"], Body()] = "pptx",
     sql_session: AsyncSession = Depends(get_async_session),
@@ -476,7 +477,7 @@ async def generate_presentation_api(
     print(f"Generated {total_outlines} outlines for the presentation")
 
     # 4. Parse Layouts
-    layout_model = await get_layout_by_name(layout)
+    layout_model = await get_layout_by_name(template)
     total_slide_layouts = len(layout_model.slides)
 
     # 5. Generate Structure
@@ -519,9 +520,10 @@ async def generate_presentation_api(
     for i, slide_layout_index in enumerate(presentation_structure.slides):
         slide_layout = layout_model.slides[slide_layout_index]
         print(f"Generating content for slide {i} with layout {slide_layout.id}")
-        slide_content = await get_slide_content_from_type_and_outline(
+        task = get_slide_content_from_type_and_outline(
             slide_layout, outlines[i], language
         )
+        slide_content_tasks.append(task)
 
     # Wait for all slide content to be generated
     all_slide_contents = await asyncio.gather(*slide_content_tasks)
@@ -537,6 +539,7 @@ async def generate_presentation_api(
             layout=slide_layout.id,
             index=i,
             content=slide_content,
+            speaker_note=slide_content.get("__speaker_note__", ""),
         )
         async_asset_generation_tasks.append(
             process_slide_and_fetch_assets(

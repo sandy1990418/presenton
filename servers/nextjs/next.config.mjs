@@ -1,14 +1,18 @@
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-
-
-/** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: false,
+  distDir: ".next-build",
   
 
+  // Rewrites for development - proxy font requests to FastAPI backend
+  async rewrites() {
+    return [
+      {
+        source: '/app_data/fonts/:path*',
+        destination: 'http://localhost:8000/app_data/fonts/:path*',
+      },
+    ];
+  },
 
   images: {
     remotePatterns: [

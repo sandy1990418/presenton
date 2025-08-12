@@ -45,7 +45,6 @@ export class ClientEmbeddingService {
       
       // Set to use local models (no external downloads during inference)
       env.allowLocalModels = false;
-      env.remoteURL = 'https://huggingface.co/';
       
       // Load a lightweight sentence embedding model
       this.model = await pipeline(
@@ -86,7 +85,7 @@ export class ClientEmbeddingService {
         const result = await this.model(text, { pooling: 'mean', normalize: true });
         
         // Convert tensor to array
-        const embedding = Array.from(result.data);
+        const embedding = Array.from(result.data) as number[];
         
         return { embedding };
       } else {
@@ -115,7 +114,7 @@ export class ClientEmbeddingService {
         const results = await this.model(texts, { pooling: 'mean', normalize: true });
         
         for (let i = 0; i < texts.length; i++) {
-          const embedding = Array.from(results.data.slice(i * results.dims[1], (i + 1) * results.dims[1]));
+          const embedding = Array.from(results.data.slice(i * results.dims[1], (i + 1) * results.dims[1])) as number[];
           embeddings.push({ embedding });
         }
       } else {
@@ -290,13 +289,13 @@ export class ClientEmbeddingService {
 
     images.forEach((image, imageIndex) => {
       const imageText = (image.contextText || '').toLowerCase();
-      const keywords = imageText.split(/\s+/).filter(word => word.length > 3);
+      const keywords = imageText.split(/\s+/).filter((word: string) => word.length > 3);
 
       let bestMatch = { slideIndex: 0, score: 0 };
 
       slides.forEach((slide, slideIndex) => {
         const slideText = `${slide.title || ''} ${slide.body || ''}`.toLowerCase();
-        const keywordMatches = keywords.filter(keyword => slideText.includes(keyword)).length;
+        const keywordMatches = keywords.filter((keyword: string) => slideText.includes(keyword)).length;
         const score = keywords.length > 0 ? keywordMatches / keywords.length : 0.1;
 
         if (score > bestMatch.score) {

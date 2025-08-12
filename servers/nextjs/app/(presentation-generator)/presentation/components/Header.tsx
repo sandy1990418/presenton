@@ -26,8 +26,9 @@ import { toast } from "sonner";
 import Announcement from "@/components/Announcement";
 import { PptxPresentationModel } from "@/types/pptx_models";
 import HeaderNav from "../../components/HeaderNab";
-import { downloadFile } from "@/utils/exportUtils";
-
+import PDFIMAGE from "@/public/pdf.svg";
+import PPTXIMAGE from "@/public/pptx.svg";
+import Image from "next/image";
 
 const Header = ({
   presentation_id,
@@ -68,7 +69,7 @@ const Header = ({
       const pptx_path = await PresentationGenerationApi.exportAsPPTX(pptx_model);
       console.log('Received PPTX path from API:', pptx_path);
       if (pptx_path) {
-        downloadFile(pptx_path);
+        window.open(pptx_path, '_blank');
       } else {
         throw new Error("No path returned from export");
       }
@@ -103,7 +104,7 @@ const Header = ({
 
       if (response.ok) {
         const { path: pdfPath } = await response.json();
-        downloadFile(pdfPath);
+        window.open(pdfPath, '_blank');
       } else {
         throw new Error("Failed to export PDF");
       }
@@ -125,7 +126,7 @@ const Header = ({
         onClick={handleExportPdf}
         variant="ghost"
         className={`pb-4 border-b rounded-none border-gray-300 w-full flex justify-start text-[#5146E5] ${mobile ? "bg-white py-6 border-none rounded-lg" : ""}`} >
-        <img src="/pdf.svg" alt="pdf export" width={30} height={30} />
+        <Image src={PDFIMAGE} alt="pdf export" width={30} height={30} />
         Export as PDF
       </Button>
       <Button
@@ -133,7 +134,7 @@ const Header = ({
         variant="ghost"
         className={`w-full flex justify-start text-[#5146E5] ${mobile ? "bg-white py-6" : ""}`}
       >
-        <img src="/pptx.svg" alt="pptx export" width={30} height={30} />
+        <Image src={PPTXIMAGE} alt="pptx export" width={30} height={30} />
         Export as PPTX
       </Button>
 

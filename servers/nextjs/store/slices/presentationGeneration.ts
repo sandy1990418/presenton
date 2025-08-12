@@ -12,6 +12,11 @@ export interface PresentationData {
   n_slides: number;
   title: string;
   slides: any;
+  prompt?: string;
+  outlines?: any;
+  created_at?: string;
+  updated_at?: string;
+  structure?: any;
 }
 
 interface PresentationGenerationState {
@@ -379,6 +384,30 @@ const presentationGenerationSlice = createSlice({
         }
       }
     },
+
+    // Update slide flowchart data
+    updateSlideFlowchart: (
+      state,
+      action: PayloadAction<{
+        index: number;
+        flowchart: any;
+      }>
+    ) => {
+      if (
+        state.presentationData &&
+        state.presentationData.slides &&
+        state.presentationData.slides[action.payload.index]
+      ) {
+        const slide = state.presentationData.slides[action.payload.index];
+        
+        // Update the flowchart data in the slide content
+        if (!slide.content) {
+          slide.content = {};
+        }
+        
+        slide.content.flowchart = action.payload.flowchart;
+      }
+    },
   },
 });
 
@@ -402,6 +431,7 @@ export const {
   updateSlideImage,
   updateImageProperties,
   updateSlideIcon,
+  updateSlideFlowchart,
   addNewSlide,
 } = presentationGenerationSlice.actions;
 

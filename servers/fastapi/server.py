@@ -1,7 +1,6 @@
 import uvicorn
 import argparse
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the FastAPI server")
     parser.add_argument(
@@ -12,7 +11,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     reload = args.reload == "true"
-
+    
     uvicorn.run(
         "api.main:app",
         host="0.0.0.0",

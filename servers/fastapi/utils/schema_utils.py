@@ -45,6 +45,48 @@ def remove_fields_from_schema(schema: dict, fields_to_remove: List[str]):
     return schema
 
 
+def add_field_in_schema(schema: dict, field: dict, required: bool = False) -> dict:
+
+    if not isinstance(field, dict) or len(field) != 1:
+        raise ValueError(
+            "`field` must be a dict with exactly one entry: {name: schema_dict}"
+        )
+
+    field_name, field_schema = next(iter(field.items()))
+    if not isinstance(field_name, str):
+        raise TypeError("Field name must be a string")
+    if not isinstance(field_schema, dict):
+        raise TypeError("Field schema must be a dictionary")
+
+    updated_schema: dict = deepcopy(schema)
+
+    root_properties = updated_schema.get("properties")
+    if not isinstance(root_properties, dict):
+        updated_schema["properties"] = {}
+        root_properties = updated_schema["properties"]
+
+    root_properties[field_name] = field_schema
+
+    # Update root-level required based on the flag
+    existing_required = updated_schema.get("required")
+    if not isinstance(existing_required, list):
+        existing_required = []
+
+    if required:
+        if field_name not in existing_required:
+            existing_required.append(field_name)
+    else:
+        if field_name in existing_required:
+            existing_required = [name for name in existing_required if name != field_name]
+
+    if existing_required:
+        updated_schema["required"] = existing_required
+    else:
+        updated_schema.pop("required", None)
+
+    return updated_schema
+
+
 # From OpenAI
 def ensure_strict_json_schema(
     json_schema: object,
@@ -175,6 +217,95 @@ def resolve_ref(*, root: dict[str, object], ref: str) -> object:
         resolved = value
 
     return resolved
+
+
+# Flattens a JSON schema by inlining all $ref references and removing $defs/definitions
+def flatten_json_schema(schema: dict) -> dict:
+    root_schema = deepcopy(schema)
+
+    def _flatten(node: Any) -> Any:
+        if isinstance(node, dict):
+            # If node is a pure $ref (or combined with extra fields), inline it
+            if "$ref" in node:
+                ref_value = node["$ref"]
+                assert isinstance(
+                    ref_value, str
+                ), f"Received non-string $ref - {ref_value}"
+                resolved = resolve_ref(root=root_schema, ref=ref_value)
+                assert isinstance(
+                    resolved, dict
+                ), f"Expected `$ref: {ref_value}` to resolve to a dictionary but got {type(resolved)}"
+                # Merge: referenced first, then overlay current (excluding $ref)
+                merged: dict[str, Any] = deepcopy(resolved)
+                for key, value in node.items():
+                    if key == "$ref":
+                        continue
+                    merged[key] = value
+                return _flatten(merged)
+
+            flattened: dict[str, Any] = {}
+            for key, value in node.items():
+                # Drop defs/definitions in output
+                if key in ("$defs", "definitions"):
+                    continue
+                if key == "properties" and isinstance(value, dict):
+                    flattened[key] = {
+                        prop_key: _flatten(prop_val)
+                        for prop_key, prop_val in value.items()
+                    }
+                elif key in ("items", "contains", "additionalProperties", "not"):
+                    if isinstance(value, dict):
+                        flattened[key] = _flatten(value)
+                    elif isinstance(value, list):
+                        flattened[key] = [_flatten(v) for v in value]
+                    else:
+                        flattened[key] = value
+                elif key in ("allOf", "anyOf", "oneOf", "prefixItems") and isinstance(
+                    value, list
+                ):
+                    flattened[key] = [_flatten(v) for v in value]
+                else:
+                    flattened[key] = (
+                        _flatten(value) if isinstance(value, (dict, list)) else value
+                    )
+            return flattened
+        if isinstance(node, list):
+            return [_flatten(v) for v in node]
+        return node
+
+    result = _flatten(schema)
+    # Ensure top-level cleanup just in case
+    if isinstance(result, dict):
+        result.pop("$defs", None)
+        result.pop("definitions", None)
+    return result
+
+
+def remove_titles_from_schema(schema: dict) -> dict[str, Any]:
+
+    def _strip_titles(node: Any) -> Any:
+        if isinstance(node, dict):
+            rebuilt: dict[str, Any] = {}
+            for key, value in node.items():
+                # Preserve properties named "title" under the JSON Schema "properties" mapping
+                if key == "properties" and isinstance(value, dict):
+                    rebuilt[key] = {
+                        prop_name: _strip_titles(prop_schema)
+                        for prop_name, prop_schema in value.items()
+                    }
+                    continue
+
+                # Remove schema metadata field "title" elsewhere
+                if key == "title":
+                    continue
+
+                rebuilt[key] = _strip_titles(value)
+            return rebuilt
+        if isinstance(node, list):
+            return [_strip_titles(item) for item in node]
+        return node
+
+    return _strip_titles(deepcopy(schema))
 
 
 # ? Not used

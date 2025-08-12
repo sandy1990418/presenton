@@ -6,6 +6,7 @@ import Link from "next/link";
 import BackBtn from "@/components/BackBtn";
 import { usePathname } from "next/navigation";
 import HeaderNav from "@/app/(presentation-generator)/components/HeaderNab";
+import { Layout, FilePlus2 } from "lucide-react";
 const Header = () => {
   const pathname = usePathname();
   return (
@@ -13,7 +14,7 @@ const Header = () => {
       <Wrapper>
         <div className="flex items-center justify-between py-1">
           <div className="flex items-center gap-3">
-            {pathname !== '/upload' && <BackBtn />}
+            {pathname !== "/upload" && <BackBtn />}
             <Link href="/dashboard">
               <img
                 src="/logo-white.png"
@@ -22,7 +23,25 @@ const Header = () => {
               />
             </Link>
           </div>
-          <div className="flex items-center gap-3 sm:gap-5 md:gap-10">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/custom-template"
+              prefetch={false}
+              className="flex items-center gap-2 px-3 py-2 text-white hover:bg-primary/80 rounded-md transition-colors outline-none"
+              role="menuitem"
+            >
+              <FilePlus2 className="w-5 h-5" />
+              <span className="text-sm font-medium font-inter">Create Template</span>
+            </Link>
+            <Link
+              href="/template-preview"
+              prefetch={false}
+              className="flex items-center gap-2 px-3 py-2 text-white hover:bg-primary/80 rounded-md transition-colors outline-none"
+              role="menuitem"
+            >
+              <Layout className="w-5 h-5" />
+              <span className="text-sm font-medium font-inter">Templates</span>
+            </Link>
             <HeaderNav />
           </div>
         </div>

@@ -10,10 +10,10 @@ export const usePresentationNavigation = (
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const isPresentMode = searchParams.get("mode") === "present";
-  const stream = searchParams.get("stream");
+  const isPresentMode = searchParams?.get("mode") === "present";
+  const stream = searchParams?.get("stream");
   const currentSlide = parseInt(
-    searchParams.get("slide") || `${selectedSlide}` || "0"
+    searchParams?.get("slide") || `${selectedSlide}` || "0"
   );
 
   const handleSlideClick = useCallback((index: number) => {
