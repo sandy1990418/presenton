@@ -20,3 +20,7 @@ CLAUDE.md
 fastembed_vectorstore/
 # temp.*
 generated_models
+servers/fastapi/data
+servers/fastapi/example_web_search_usage.py
+servers/fastapi/tests
+servers/fastapi/nltk/
