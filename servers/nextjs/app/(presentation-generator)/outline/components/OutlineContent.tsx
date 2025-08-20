@@ -15,12 +15,16 @@ import {
 } from "@dnd-kit/sortable";
 import { OutlineItem } from "./OutlineItem";
 import { Button } from "@/components/ui/button";
-import { FileText, Edit3, Eye } from "lucide-react";
+import { FileText, Loader2 } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { trackEvent, MixpanelEvent } from "@/utils/mixpanel";
 
 interface OutlineContentProps {
     outlines: { content: string }[] | null;
     isLoading: boolean;
     isStreaming: boolean;
+    activeSlideIndex: number | null;
+    highestActiveIndex: number;
     onDragEnd: (event: any) => void;
     onAddSlide: () => void;
 }
@@ -29,6 +33,8 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
     outlines,
     isLoading,
     isStreaming,
+    activeSlideIndex,
+    highestActiveIndex,
     onDragEnd,
     onAddSlide
 }) => {
@@ -41,43 +47,19 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
         })
     );
 
-    const generateMarkdownPreview = (outlines: { content: string }[]) => {
-        if (!outlines || outlines.length === 0) return "";
-        
-        let markdown = "# Presentation Architecture\n\n";
-        markdown += `📊 **Total Slides:** ${outlines.length}\n\n`;
-        markdown += "## Slide Structure\n\n";
-        
-        outlines.forEach((outline, index) => {
-            const slideNumber = index + 1;
-            const title = `Slide ${slideNumber}`;
-            const body = outline.content || "No content";
-            
-            // Detect if it's a mermaid slide
-            const isMermaidSlide = body.toLowerCase().includes("mermaid") || 
-                                   body.toLowerCase().includes("diagram") ||
-                                   body.toLowerCase().includes("flowchart") ||
-                                   body.toLowerCase().includes("graph");
-            
-            markdown += `### ${slideNumber}. ${title}\n`;
-            if (isMermaidSlide) {
-                markdown += "🔄 **Type:** Mermaid Diagram\n";
-            } else {
-                markdown += "📝 **Type:** Content Slide\n";
-            }
-            
-            // Truncate long content for preview
-            const truncatedBody = body.length > 100 ? body.substring(0, 100) + "..." : body;
-            markdown += `**Content:** ${truncatedBody}\n\n`;
-        });
-        
-        return markdown;
-    };
+    const pathname = usePathname();
 
     return (
         <div className="space-y-6 font-instrument_sans">
-            {/* Header with view toggle */}
-            <div className="flex items-center justify-between">
+            {isLoading && (!outlines || outlines.length === 0) && (
+                <div className="flex items-center justify-center">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 text-blue-600 px-2 py-0.5 text-xs">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Thinking
+                    </span>
+                </div>
+            )}
+            {/* <div className="flex items-center justify-between">
                 <h5 className="text-lg font-medium">
                     Presentation Outline
                 </h5>
@@ -154,6 +136,8 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
                                 index={index + 1}
                                 slideOutline={item}
                                 isStreaming={isStreaming}
+                                isActiveStreaming={activeSlideIndex === index}
+                                isStableStreaming={highestActiveIndex >= 0 && index < highestActiveIndex}
                             />
                         ))
                         ) :
@@ -167,50 +151,24 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
                                     index={index + 1}
                                     slideOutline={item}
                                     isStreaming={isStreaming}
+                                    isActiveStreaming={false}
+                                    isStableStreaming={false}
                                 />
                             ))}
                         </SortableContext>}
                     </DndContext>
 
-                    {viewMode === 'edit' ? (
-                        <>
-                            <Button
-                                variant="outline"
-                                onClick={onAddSlide}
-                                disabled={isLoading || isStreaming}
-                                className="w-full my-4 text-blue-600 border-blue-200"
-                            >
-                                + Add Slide
-                            </Button>
-                        </>
-                    ) : (
-                        /* Markdown Preview Mode */
-                        <div className="bg-white rounded-lg border p-6">
-                            <div className="prose prose-sm max-w-none">
-                                <div 
-                                    className="markdown-content"
-                                    dangerouslySetInnerHTML={{ 
-                                        __html: generateMarkdownPreview(outlines || [])
-                                            .replace(/\n/g, '<br/>')
-                                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                                            .replace(/^### (.*?)$/gm, '<h3 class="text-lg font-semibold text-gray-800 mt-4 mb-2">$1</h3>')
-                                            .replace(/^## (.*?)$/gm, '<h2 class="text-xl font-bold text-gray-900 mt-6 mb-3">$1</h2>')
-                                            .replace(/^# (.*?)$/gm, '<h1 class="text-2xl font-bold text-blue-600 mb-4">$1</h1>')
-                                    }}
-                                />
-                            </div>
-                            <div className="mt-6 pt-4 border-t">
-                                <Button
-                                    variant="outline"
-                                    onClick={() => setViewMode('edit')}
-                                    className="text-blue-600 border-blue-200"
-                                >
-                                    <Edit3 className="w-4 h-4 mr-2" />
-                                    Switch to Edit Mode
-                                </Button>
-                            </div>
-                        </div>
-                    )}
+                    <Button
+                        variant="outline"
+                        onClick={() => {
+                            trackEvent(MixpanelEvent.Outline_Add_Slide_Button_Clicked, { pathname });
+                            onAddSlide();
+                        }}
+                        disabled={isLoading || isStreaming}
+                        className="w-full my-4 text-blue-600 border-blue-200"
+                    >
+                        + Add Slide
+                    </Button>
                 </div>
             )}
 
@@ -221,7 +179,10 @@ const OutlineContent: React.FC<OutlineContentProps> = ({
                     <p className="text-gray-600 mb-4">No outlines available</p>
                     <Button
                         variant="outline"
-                        onClick={onAddSlide}
+                        onClick={() => {
+                            trackEvent(MixpanelEvent.Outline_Add_Slide_Button_Clicked, { pathname });
+                            onAddSlide();
+                        }}
                         className="text-blue-600 border-blue-200"
                     >
                         + Add First Slide

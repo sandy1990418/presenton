@@ -7,10 +7,13 @@ import { NextResponse, NextRequest } from 'next/server';
 
 
 export async function POST(req: NextRequest) {
-  const { id, title } = await req.json();
-  if (!id) {
-    return NextResponse.json({ error: "Missing Presentation ID" }, { status: 400 });
-  }
+  try {
+    const { id, title } = await req.json();
+    console.log('PDF Export request:', { id, title });
+    
+    if (!id) {
+      return NextResponse.json({ error: "Missing Presentation ID" }, { status: 400 });
+    }
   const browser = await puppeteer.launch({
     headless: true,
     args: [
@@ -20,6 +23,8 @@ export async function POST(req: NextRequest) {
   });
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
+  page.setDefaultNavigationTimeout(300000);
+  page.setDefaultTimeout(300000);
 
   await page.goto(`http://localhost:3000/pdf-maker?id=${id}`, { waitUntil: 'networkidle0', timeout: 180000 });
 
@@ -47,7 +52,7 @@ export async function POST(req: NextRequest) {
         return (loadedElements / totalElements) >= 0.99;
       }
       `,
-      { timeout: 10000 }
+      { timeout: 300000 }
     );
 
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -64,15 +69,29 @@ export async function POST(req: NextRequest) {
     margin: { top: 0, right: 0, bottom: 0, left: 0 },
   });
 
-  browser.close();
+    await browser.close();
 
-  const sanitizedTitle = sanitizeFilename(title);
-  const destinationPath = path.join(process.env.APP_DATA_DIRECTORY!, 'exports', `${sanitizedTitle}.pdf`);
-  await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
-  await fs.promises.writeFile(destinationPath, pdfBuffer);
+    const sanitizedTitle = sanitizeFilename(title ?? 'presentation').replace(/\s+/g, '_');
+    const fileName = `${sanitizedTitle}.pdf`;
+    const destinationPath = path.join(process.env.APP_DATA_DIRECTORY!, 'exports', fileName);
+    
+    await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
+    await fs.promises.writeFile(destinationPath, pdfBuffer);
 
-  return NextResponse.json({
-    success: true,
-    path: destinationPath
-  });
+    console.log(`PDF generated successfully: ${fileName}, size: ${pdfBuffer.length} bytes`);
+
+    // Return the download URL in JSON format for compatibility
+    const downloadUrl = `/api/download/${fileName}`;
+    return NextResponse.json({
+      success: true,
+      path: downloadUrl,
+      filename: fileName
+    });
+  } catch (error) {
+    console.error('PDF Export error:', error);
+    return NextResponse.json({ 
+      error: 'Failed to generate PDF',
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
+  }
 }

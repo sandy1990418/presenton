@@ -249,7 +249,7 @@ async def analyze_fonts_in_all_slides(slide_xmls: List[str]) -> FontAnalysisResu
     
     return FontAnalysisResult(
         internally_supported_fonts=internally_supported_fonts,
-        not_supported_fonts=not_supported_fonts
+        not_supported_fonts=[]
     )
 
 
@@ -274,6 +274,12 @@ async def process_pptx_slides(
         raise HTTPException(
             status_code=400,
             detail=f"Invalid file type. Expected PPTX file, got {pptx_file.content_type}"
+        )
+    # Enforce 100MB size limit
+    if hasattr(pptx_file, "size") and pptx_file.size and pptx_file.size > (100 * 1024 * 1024):
+        raise HTTPException(
+            status_code=400,
+            detail="PPTX file exceeded max upload size of 100 MB",
         )
     
     # Create temporary directory for processing

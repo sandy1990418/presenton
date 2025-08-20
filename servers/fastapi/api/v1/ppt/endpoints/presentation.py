@@ -3,12 +3,12 @@ import json
 import os
 import random
 from typing import Annotated, List, Literal, Optional
-from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
-from constants.documents import UPLOAD_ACCEPTED_FILE_TYPES
+from models.generate_presentation_request import GeneratePresentationRequest
 from models.presentation_and_path import PresentationPathAndEditPath
 from models.presentation_from_template import GetPresentationUsingTemplateRequest
 from models.presentation_outline_model import (
@@ -19,7 +19,7 @@ from models.pptx_models import PptxPresentationModel
 from models.presentation_layout import PresentationLayoutModel
 from models.presentation_structure_model import PresentationStructureModel
 from models.presentation_with_slides import PresentationWithSlides
-from services.score_based_chunker import ScoreBasedChunker
+
 from utils.get_layout_by_name import get_layout_by_name
 from services.icon_finder_service import IconFinderService
 from services.image_generation_service import ImageGenerationService
@@ -28,9 +28,9 @@ from utils.export_utils import export_presentation
 from utils.llm_calls.generate_presentation_outlines import generate_ppt_outline
 from models.sql.slide import SlideModel
 from models.sse_response import SSECompleteResponse, SSEResponse
-from services import TEMP_FILE_SERVICE
+
 from services.database import get_async_session
-from services.documents_loader import DocumentsLoader
+from services import TEMP_FILE_SERVICE
 from models.sql.presentation import PresentationModel
 from services.pptx_presentation_creator import PptxPresentationCreator
 from utils.asset_directory_utils import get_exports_directory, get_images_directory
@@ -42,8 +42,10 @@ from utils.llm_calls.generate_slide_content import (
 )
 from utils.process_slides import process_slide_and_fetch_assets, convert_file_path_to_web_url
 from utils.randomizers import get_random_uuid
+from pathvalidate import sanitize_filename
 from utils.validators import validate_files
 from typing import Set
+
 
 PRESENTATION_ROUTER = APIRouter(prefix="/presentation", tags=["Presentation"])
 
@@ -400,63 +402,34 @@ async def create_pptx(
     await pptx_creator.create_ppt()
 
     export_directory = get_exports_directory()
+    sanitized_name = sanitize_filename(pptx_model.name or get_random_uuid()).replace(' ', '_')
     pptx_path = os.path.join(
-        export_directory, f"{pptx_model.name or get_random_uuid()}.pptx"
+        export_directory, f"{sanitized_name}.pptx"
     )
     pptx_creator.save(pptx_path)
 
-    return pptx_path
+    # Return download URL instead of file path
+    filename = os.path.basename(pptx_path)
+    return f"/api/download/{filename}"
 
 
 @PRESENTATION_ROUTER.post("/generate", response_model=PresentationPathAndEditPath)
 async def generate_presentation_api(
-    prompt: Annotated[str, Body()],
-    n_slides: Annotated[int, Body()] = 8,
-    language: Annotated[str, Body()] = "English",
-    template: Annotated[str, Body()] = "general",
-    files: Annotated[Optional[List[UploadFile]], File()] = None,
-    export_as: Annotated[Literal["pptx", "pdf"], Body()] = "pptx",
+    request: GeneratePresentationRequest,
     sql_session: AsyncSession = Depends(get_async_session),
 ):
-    validate_files(files, True, True, 50, UPLOAD_ACCEPTED_FILE_TYPES)
-
     presentation_id = get_random_uuid()
-
-    temp_dir = TEMP_FILE_SERVICE.create_temp_dir()
-
-    # 1. Save uploaded files
-    file_paths = []
-    if files:
-        for upload in files:
-            file_path = os.path.join(temp_dir, upload.filename)
-            with open(file_path, "wb") as f:
-                f.write(await upload.read())
-            file_paths.append(file_path)
 
     # 3. Generate Outlines
     presentation_outlines = None
     additional_context = ""
-    if file_paths:
-        documents_loader = DocumentsLoader(file_paths=file_paths)
-        await documents_loader.load_documents(temp_dir)
-        documents = documents_loader.documents
-        if documents:
-            additional_context = documents[0]
-            chunker = ScoreBasedChunker()
-            try:
-                chunks = await chunker.get_n_chunks(documents[0], n_slides)
-                presentation_outlines = PresentationOutlineModel(
-                    slides=[chunk.to_slide_outline() for chunk in chunks]
-                )
-            except Exception as e:
-                print(e)
 
     if not presentation_outlines:
         presentation_outlines_text = ""
         async for chunk in generate_ppt_outline(
-            prompt,
-            n_slides,
-            language,
+            request.prompt,
+            request.n_slides,
+            request.language,
             additional_context,
         ):
             presentation_outlines_text += chunk
@@ -470,14 +443,14 @@ async def generate_presentation_api(
             detail="Failed to generate presentation outlines. Please try again.",
         )
     presentation_outlines = PresentationOutlineModel(**presentation_outlines_json)
-    outlines = presentation_outlines.slides[:n_slides]
+    outlines = presentation_outlines.slides[:request.n_slides]
     total_outlines = len(outlines)
 
     print("-" * 40)
     print(f"Generated {total_outlines} outlines for the presentation")
 
     # 4. Parse Layouts
-    layout_model = await get_layout_by_name(template)
+    layout_model = await get_layout_by_name(request.template)
     total_slide_layouts = len(layout_model.slides)
 
     # 5. Generate Structure
@@ -503,9 +476,9 @@ async def generate_presentation_api(
     # 6. Create PresentationModel
     presentation = PresentationModel(
         id=presentation_id,
-        prompt=prompt,
-        n_slides=n_slides,
-        language=language,
+        prompt=request.prompt,
+        n_slides=request.n_slides,
+        language=request.language,
         outlines=presentation_outlines.model_dump(),
         layout=layout_model.model_dump(),
         structure=presentation_structure.model_dump(),
@@ -516,30 +489,21 @@ async def generate_presentation_api(
     async_asset_generation_tasks = []
 
     # 7. Generate slide content in parallel
-    slide_content_tasks = []
+    slides: List[SlideModel] = []
+    slide_contents: List[dict] = []
     for i, slide_layout_index in enumerate(presentation_structure.slides):
         slide_layout = layout_model.slides[slide_layout_index]
         print(f"Generating content for slide {i} with layout {slide_layout.id}")
-        task = get_slide_content_from_type_and_outline(
-            slide_layout, outlines[i], language
+        slide_content = await get_slide_content_from_type_and_outline(
+            slide_layout, outlines[i], request.language
         )
-        slide_content_tasks.append(task)
-
-    # Wait for all slide content to be generated
-    all_slide_contents = await asyncio.gather(*slide_content_tasks)
-
-    # Create slides and prepare asset generation tasks
-    slides: List[SlideModel] = []
-    slide_contents: List[dict] = []
-    for i, (slide_layout_index, slide_content) in enumerate(zip(presentation_structure.slides, all_slide_contents)):
-        slide_layout = layout_model.slides[slide_layout_index]
         slide = SlideModel(
             presentation=presentation_id,
             layout_group=layout_model.name,
             layout=slide_layout.id,
             index=i,
-            content=slide_content,
             speaker_note=slide_content.get("__speaker_note__", ""),
+            content=slide_content,
         )
         async_asset_generation_tasks.append(
             process_slide_and_fetch_assets(
@@ -548,6 +512,30 @@ async def generate_presentation_api(
         )
         slides.append(slide)
         slide_contents.append(slide_content)
+    # Wait for all slide content to be generated
+    # all_slide_contents = await asyncio.gather(*slide_content_tasks)
+
+    # # Create slides and prepare asset generation tasks
+    # slides: List[SlideModel] = []
+    # slide_contents: List[dict] = []
+    # for i, (slide_layout_index, slide_content) in enumerate(zip(presentation_structure.slides, all_slide_contents)):
+    #     slide_layout = layout_model.slides[slide_layout_index]
+    #     slide = SlideModel(
+    #         presentation=presentation_id,
+    #         layout_group=layout_model.name,
+    #         layout=slide_layout.id,
+    #         index=i,
+    #         speaker_note=slide_content.get("__speaker_note__", ""),
+    #         content=slide_content,
+    #         speaker_note=slide_content.get("__speaker_note__", ""),
+    #     )
+    #     async_asset_generation_tasks.append(
+    #         process_slide_and_fetch_assets(
+    #             image_generation_service, icon_finder_service, slide
+    #         )
+    #     )
+    #     slides.append(slide)
+    #     slide_contents.append(slide_content)
 
     # Process all assets in parallel
     generated_assets_lists = await asyncio.gather(*async_asset_generation_tasks)
@@ -563,7 +551,7 @@ async def generate_presentation_api(
 
     # 9. Export
     presentation_and_path = await export_presentation(
-        presentation_id, presentation.title or get_random_uuid(), export_as
+        presentation_id, presentation.title or get_random_uuid(), request.export_as
     )
 
     return PresentationPathAndEditPath(

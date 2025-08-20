@@ -17,6 +17,8 @@
 
 **Presenton** is an open-source application for generating presentations with AI — all running locally on your device. Stay in control of your data and privacy while using models like OpenAI and Gemini, or use your own hosted models through Ollama.
 
+__✨ Now, generate presentations with your existing PPTX file! Just upload your presentation file to create template design and then use that template to generate on brand and on design presentation on any topic.__
+
 ![Demo](readme_assets/demo.gif)
 
 
@@ -39,6 +41,7 @@ Presenton gives you complete control over your AI presentation workflow. Choose 
 * ✅ **AI Template Generation** — Create presentation templates from existing Powerpoint documents.
 * ✅ **Flexible Generation** — Build presentations from prompts or uploaded documents
 * ✅ **Export Ready** — Save as PowerPoint (PPTX) and PDF with professional formatting
+* ✅ **Built-In MCP Server** — Generate presentations over Model Context Protocol
 * ✅ **Bring Your Own Key** — Use your own API keys for OpenAI, Google Gemini, Anthropic Claude, or any compatible provider. Only pay for what you use, no hidden fees or subscriptions.
 * ✅ **Ollama Integration** — Run open-source models locally with full privacy
 * ✅ **OpenAI API Compatible** — Connect to any OpenAI-compatible endpoint with your own models
@@ -46,13 +49,16 @@ Presenton gives you complete control over your AI presentation workflow. Choose 
 * ✅ **Versatile Image Generation** — Choose from DALL-E 3, Gemini Flash, Pexels, or Pixabay
 * ✅ **Rich Media Support** — Icons, charts, and custom graphics for professional presentations
 * ✅ **Runs Locally** — All processing happens on your device, no cloud dependencies
-* ✅ **Privacy-First** — Zero tracking, no data stored by us, complete data sovereignty
 * ✅ **API Deployment** — Host as your own API service for your team
 * ✅ **Fully Open-Source** — Apache 2.0 licensed, inspect, modify, and contribute
 * ✅ **Docker Ready** — One-command deployment with GPU support for local models
 
+## Presenton Cloud
+We're launching Presenton Cloud which will make it very easy to create presentations through UI, API and MCP. Join our [waitlist](https://presenton.ai) for early beta. 
+
 ## Deploy on Cloud (one click deployment)
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/presenton-ai-presentations?referralCode=ubp0kk)
+
 
 ## Running Presenton Docker
 
@@ -102,6 +108,10 @@ You can also set the following environment variables to customize the image gene
 - **PIXABAY_API_KEY=[Your Pixabay API Key]**: Required if using **pixabay** as the image provider.
 - **GOOGLE_API_KEY=[Your Google API Key]**: Required if using **gemini_flash** as the image provider.
 - **OPENAI_API_KEY=[Your OpenAI API Key]**: Required if using **dall-e-3** as the image provider.
+
+You can disable anonymous telemetry using the following environment variable:
+- **DISABLE_ANONYMOUS_TELEMETRY=[true/false]**: Set this to **true** to disable anonymous telemetry.
+
 
 > **Note:** You can freely choose both the LLM (text generation) and the image provider. Supported image providers: **pexels**, **pixabay**, **gemini_flash** (Google), and **dall-e-3** (OpenAI).
 

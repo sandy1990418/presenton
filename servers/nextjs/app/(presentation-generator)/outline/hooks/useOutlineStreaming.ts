@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { toast } from "sonner";
 import { setOutlines } from "@/store/slices/presentationGeneration";
@@ -12,6 +12,11 @@ export const useOutlineStreaming = (presentationId: string | null) => {
   const { outlines } = useSelector((state: RootState) => state.presentationGeneration);
   const [isStreaming, setIsStreaming] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeSlideIndex, setActiveSlideIndex] = useState<number | null>(null);
+  const [highestActiveIndex, setHighestActiveIndex] = useState<number>(-1);
+  const prevSlidesRef = useRef<{ content: string }[]>([]);
+  const activeIndexRef = useRef<number>(-1);
+  const highestIndexRef = useRef<number>(-1);
 
   useEffect(() => {
     console.log("useOutlineStreaming effect running:", { presentationId, outlines });
@@ -45,7 +50,36 @@ export const useOutlineStreaming = (presentationId: string | null) => {
                 const partialData = JSON.parse(repairedJson);
                 
                 if (partialData.slides) {
-                  dispatch(setOutlines(partialData.slides));
+                  const nextSlides: { content: string }[] = partialData.slides || [];
+                  // Determine which slide index changed to minimize live parsing
+                  try {
+                    const prev = prevSlidesRef.current || [];
+                    let changedIndex: number | null = null;
+                    const maxLen = Math.max(prev.length, nextSlides.length);
+                    for (let i = 0; i < maxLen; i++) {
+                      const prevContent = prev[i]?.content;
+                      const nextContent = nextSlides[i]?.content;
+                      if (nextContent !== prevContent) {
+                        changedIndex = i;
+                      }
+                    }
+                    // Keep active index stable if no change detected; and ensure non-decreasing
+                    const prevActive = activeIndexRef.current;
+                    let nextActive = changedIndex ?? prevActive;
+                    if (nextActive < prevActive) {
+                      nextActive = prevActive;
+                    }
+                    activeIndexRef.current = nextActive;
+                    setActiveSlideIndex(nextActive);
+
+                    if (nextActive > highestIndexRef.current) {
+                      highestIndexRef.current = nextActive;
+                      setHighestActiveIndex(nextActive);
+                    }
+                  } catch {}
+
+                  prevSlidesRef.current = nextSlides;
+                  dispatch(setOutlines(nextSlides));
                   setIsLoading(false)
                 }
               } catch (error) {
@@ -60,6 +94,11 @@ export const useOutlineStreaming = (presentationId: string | null) => {
                 dispatch(setOutlines(outlinesData));
                   setIsStreaming(false)
                   setIsLoading(false)
+                  setActiveSlideIndex(null)
+                  setHighestActiveIndex(-1)
+                  prevSlidesRef.current = outlinesData;
+                  activeIndexRef.current = -1;
+                  highestIndexRef.current = -1;
                   eventSource.close();
               } catch (error) {
                 console.error("Error parsing complete event:", error);
@@ -74,12 +113,20 @@ export const useOutlineStreaming = (presentationId: string | null) => {
               
               setIsStreaming(false)
               setIsLoading(false)
+              setActiveSlideIndex(null)
+              setHighestActiveIndex(-1)
+              activeIndexRef.current = -1;
+              highestIndexRef.current = -1;
               eventSource.close();
               break;
             case "error":
               
               setIsStreaming(false)
               setIsLoading(false)
+              setActiveSlideIndex(null)
+              setHighestActiveIndex(-1)
+              activeIndexRef.current = -1;
+              highestIndexRef.current = -1;
               eventSource.close();
               toast.error('Error in outline streaming',
                 {
@@ -94,6 +141,10 @@ export const useOutlineStreaming = (presentationId: string | null) => {
           
           setIsStreaming(false)
           setIsLoading(false)
+          setActiveSlideIndex(null)
+          setHighestActiveIndex(-1)
+          activeIndexRef.current = -1;
+          highestIndexRef.current = -1;
           eventSource.close();
           toast.error("Failed to connect to the server. Please try again.");
         };
@@ -101,6 +152,10 @@ export const useOutlineStreaming = (presentationId: string | null) => {
         
         setIsStreaming(false)
         setIsLoading(false)
+        setActiveSlideIndex(null)
+        setHighestActiveIndex(-1)
+        activeIndexRef.current = -1;
+        highestIndexRef.current = -1;
         toast.error("Failed to initialize connection");
       }
     };
@@ -112,5 +167,5 @@ export const useOutlineStreaming = (presentationId: string | null) => {
     };
   }, [presentationId, dispatch]);
 
-  return { isStreaming, isLoading };
+  return { isStreaming, isLoading, activeSlideIndex, highestActiveIndex };
 }; 

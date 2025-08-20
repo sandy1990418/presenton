@@ -77,7 +77,7 @@ async function getBrowserAndPage(id: string): Promise<[Browser, Page]> {
   await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 });
   await page.goto(`http://localhost:3000/pdf-maker?id=${id}`, {
     waitUntil: "networkidle0",
-    timeout: 180000,
+    timeout: 300000,
   });
   return [browser, page];
 }
@@ -116,13 +116,49 @@ async function postProcessSlidesAttributes(slidesAttributes: SlideAttributesResu
 }
 
 async function screenshotElement(element: ElementAttributes, screenshotsDir: string) {
-  const screenshotPath = path.join(screenshotsDir, `${uuidv4()}.png`) as `${string}.png`;
+  try {
+    const screenshotPath = path.join(screenshotsDir, `${uuidv4()}.png`) as `${string}.png`;
 
-  // For SVG elements, use convertSvgToPng
-  if (element.tagName === 'svg') {
-    const pngBuffer = await convertSvgToPng(element);
-    fs.writeFileSync(screenshotPath, pngBuffer);
-    return screenshotPath;
+    // For SVG elements, use convertSvgToPng
+    if (element.tagName === 'svg') {
+      console.log('Processing SVG element for screenshot');
+      const pngBuffer = await convertSvgToPng(element);
+      fs.writeFileSync(screenshotPath, pngBuffer);
+      console.log(`SVG screenshot saved to: ${screenshotPath}`);
+      return screenshotPath;
+    }
+  } catch (error) {
+    console.error('Error in screenshotElement:', error);
+    console.error('Element details:', {
+      tagName: element.tagName,
+      position: element.position,
+      hasElement: !!element.element
+    });
+    
+    // Create a fallback placeholder image if SVG conversion fails
+    if (element.tagName === 'svg') {
+      const screenshotPath = path.join(screenshotsDir, `${uuidv4()}.png`) as `${string}.png`;
+      const width = Math.max(1, Math.round(element.position?.width || 100));
+      const height = Math.max(1, Math.round(element.position?.height || 100));
+      
+      // Create a simple placeholder PNG
+      const placeholderBuffer = await sharp({
+        create: {
+          width,
+          height,
+          channels: 4,
+          background: { r: 240, g: 240, b: 240, alpha: 1 }
+        }
+      })
+      .png()
+      .toBuffer();
+      
+      fs.writeFileSync(screenshotPath, placeholderBuffer);
+      console.log(`Created placeholder image at: ${screenshotPath}`);
+      return screenshotPath;
+    }
+    
+    throw error;
   }
 
   // Hide all elements except the target element and its ancestors
@@ -169,21 +205,57 @@ async function screenshotElement(element: ElementAttributes, screenshotsDir: str
 }
 
 const convertSvgToPng = async (element_attibutes: ElementAttributes) => {
-  const svgHtml = await element_attibutes.element?.evaluate((el) => {
+  try {
+    const svgHtml = await element_attibutes.element?.evaluate((el) => {
+      // Apply font color
+      const fontColor = window.getComputedStyle(el).color;
+      (el as HTMLElement).style.color = fontColor;
 
-    // Apply font color
-    const fontColor = window.getComputedStyle(el).color;
-    (el as HTMLElement).style.color = fontColor;
+      return el.outerHTML;
+    }) || '';
 
-    return el.outerHTML;
-  }) || '';
+    if (!svgHtml || !svgHtml.includes('<svg')) {
+      console.error('Invalid SVG HTML:', svgHtml);
+      throw new Error('No valid SVG content found');
+    }
 
-  const svgBuffer = Buffer.from(svgHtml);
-  const pngBuffer = await sharp(svgBuffer)
-    .resize(Math.round(element_attibutes.position!.width!), Math.round(element_attibutes.position!.height!))
-    .toFormat('png')
-    .toBuffer();
-  return pngBuffer;
+    // Fix dimensions - ensure valid width and height attributes
+    const targetWidth = Math.max(1, Math.round(element_attibutes.position?.width || 100));
+    const targetHeight = Math.max(1, Math.round(element_attibutes.position?.height || 100));
+    
+    console.log(`Converting SVG with dimensions: ${targetWidth}x${targetHeight}`);
+    
+    // Completely rebuild the SVG opening tag to avoid any duplicate attributes
+    let cleanedSvg = svgHtml.replace(
+      /<svg[^>]*>/,
+      () => {
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="${targetWidth}" height="${targetHeight}" viewBox="0 0 ${targetWidth} ${targetHeight}">`;
+      }
+    );
+
+    // Ensure the SVG is properly closed
+    if (!cleanedSvg.includes('</svg>')) {
+      cleanedSvg += '</svg>';
+    }
+
+    console.log('Cleaned SVG (first 200 chars):', cleanedSvg.substring(0, 200));
+
+    const svgBuffer = Buffer.from(cleanedSvg, 'utf8');
+    const pngBuffer = await sharp(svgBuffer)
+      .resize(targetWidth, targetHeight)
+      .toFormat('png')
+      .toBuffer();
+    
+    console.log(`Successfully converted SVG to PNG, buffer size: ${pngBuffer.length}`);
+    return pngBuffer;
+  } catch (error) {
+    console.error('Error in convertSvgToPng:', error);
+    console.error('Element attributes:', {
+      tagName: element_attibutes.tagName,
+      position: element_attibutes.position
+    });
+    throw error;
+  }
 }
 
 

@@ -17,6 +17,7 @@ const LayoutSelection: React.FC<LayoutSelectionProps> = ({
         getLayoutsByGroup,
         getGroupSetting,
         getAllGroups,
+        getFullDataByGroup,
         loading
     } = useLayout();
 
@@ -47,7 +48,14 @@ const LayoutSelection: React.FC<LayoutSelectionProps> = ({
         const groups = getAllGroups();
         if (groups.length === 0) return [];
 
-        const Groups: LayoutGroup[] = groups.map(groupName => {
+        const Groups: LayoutGroup[] = groups
+            .filter(groupName => {
+                // Filter out groups that contain any errored layouts (from custom templates compile/parse errors)
+                const fullData = getFullDataByGroup(groupName);
+                const hasErroredLayouts = fullData.some(fd => (fd as any)?.component?.displayName === "CustomTemplateErrorSlide");
+                return !hasErroredLayouts;
+            })
+            .map(groupName => {
             const settings = getGroupSetting(groupName);
             const customMeta = summaryMap[groupName];
             const isCustom = groupName.toLowerCase().startsWith("custom-");
@@ -66,7 +74,7 @@ const LayoutSelection: React.FC<LayoutSelectionProps> = ({
             if (!a.default && b.default) return 1;
             return a.name.localeCompare(b.name);
         });
-    }, [getAllGroups, getLayoutsByGroup, getGroupSetting, summaryMap]);
+    }, [getAllGroups, getLayoutsByGroup, getGroupSetting, getFullDataByGroup, summaryMap]);
 
     const inBuiltGroups = React.useMemo(
         () => layoutGroups.filter(g => !g.id.toLowerCase().startsWith("custom-")),
@@ -172,16 +180,22 @@ const LayoutSelection: React.FC<LayoutSelectionProps> = ({
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-lg font-semibold text-gray-900">Custom AI Templates</h3>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {customGroups.map((group) => (
-                        <GroupLayouts
-                            key={group.id}
-                            group={group}
-                            onSelectLayoutGroup={handleLayoutGroupSelection}
-                            selectedLayoutGroup={selectedLayoutGroup}
-                        />
-                    ))}
-                </div>
+                {customGroups.length === 0 ? (
+                    <div className="text-sm text-gray-600 py-2">
+                        No custom templates. Create one from "Create Template" menu.
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {customGroups.map((group) => (
+                            <GroupLayouts
+                                key={group.id}
+                                group={group}
+                                onSelectLayoutGroup={handleLayoutGroupSelection}
+                                selectedLayoutGroup={selectedLayoutGroup}
+                            />
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );

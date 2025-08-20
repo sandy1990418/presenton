@@ -10,16 +10,18 @@ import { useFileUpload } from "./hooks/useFileUpload";
 import { useSlideProcessing } from "./hooks/useSlideProcessing";
 import { useLayoutSaving } from "./hooks/useLayoutSaving";
 import { useAPIKeyCheck } from "./hooks/useAPIKeyCheck";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { LoadingSpinner } from "./components/LoadingSpinner";
 import { FileUploadSection } from "./components/FileUploadSection";
 import { SaveLayoutButton } from "./components/SaveLayoutButton";
 import { SaveLayoutModal } from "./components/SaveLayoutModal";
 import EachSlide from "./components/EachSlide/NewEachSlide";
 import { APIKeyWarning } from "./components/APIKeyWarning";
+import { trackEvent, MixpanelEvent } from "@/utils/mixpanel";
 
 const CustomTemplatePage = () => {
   const router = useRouter();
+  const pathname = usePathname();
   const { refetch } = useLayout();
   
   // Custom hooks for different concerns
@@ -42,6 +44,7 @@ const CustomTemplatePage = () => {
   );
 
   const handleSaveTemplate = async (layoutName: string, description: string): Promise<string | null> => {
+    trackEvent(MixpanelEvent.CustomTemplate_Save_Templates_API_Call);
     const id = await saveLayout(layoutName, description);
     if (id) {
       router.push(`/template-preview/custom-${id}`);
@@ -79,7 +82,6 @@ const CustomTemplatePage = () => {
     }
   }, []);
 
-
   // Loading state
   if (isRequiredKeyLoading) {
     return <LoadingSpinner message="Checking API Key..." />;
@@ -101,8 +103,8 @@ const CustomTemplatePage = () => {
             Custom Template Processor
           </h1>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Upload your PPTX file to extract slides and convert them to
-            template which then can be used to generate AI presentations.
+            Upload your PDF or PPTX file to extract slides and convert them to
+            a template which you can use to generate AI presentations.
           </p>
           <div className="max-w-2xl mx-auto mt-2">
             <div className="inline-block rounded border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-700">

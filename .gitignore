@@ -29,3 +29,4 @@ nltk
 chroma
 container.db
 .next-build
+.cursor

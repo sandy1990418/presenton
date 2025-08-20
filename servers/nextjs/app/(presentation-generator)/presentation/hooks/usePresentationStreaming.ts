@@ -300,6 +300,7 @@ import {
 } from "@/store/slices/presentationGeneration";
 import { jsonrepair } from "jsonrepair";
 import { toast } from "sonner";
+import { MixpanelEvent, trackEvent } from "@/utils/mixpanel";
 
 export const usePresentationStreaming = (
   presentationId: string,
@@ -318,6 +319,8 @@ export const usePresentationStreaming = (
     const initializeStream = async () => {
       dispatch(setStreaming(true));
       dispatch(clearPresentationData());
+
+      trackEvent(MixpanelEvent.Presentation_Stream_API_Call);
 
       eventSource = new EventSource(
         `/api/v1/ppt/presentation/stream?presentation_id=${presentationId}`
@@ -392,7 +395,7 @@ export const usePresentationStreaming = (
             setLoading(false);
             dispatch(setStreaming(false));
             setError(true);
-             break;
+            break;
         }
       });
 
