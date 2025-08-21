@@ -88,7 +88,7 @@ const startServers = async () => {
     ],
     {
       cwd: fastapiDir,
-      stdio: "inherit",
+      stdio: "ignore",
       env: process.env,
     },
   );

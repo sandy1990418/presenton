@@ -180,6 +180,8 @@ async def prepare_presentation(
     if not presentation:
         raise HTTPException(status_code=404, detail="Presentation not found")
 
+    presentation_outline_model = PresentationOutlineModel(slides=outlines)
+
     total_slide_layouts = len(layout.slides)
     total_outlines = len(outlines)
 
@@ -188,7 +190,7 @@ async def prepare_presentation(
     else:
         presentation_structure: PresentationStructureModel = (
             await generate_presentation_structure(
-                presentation_outline=presentation.get_presentation_outline(),
+                presentation_outline=presentation_outline_model,
                 presentation_layout=layout,
             )
         )
@@ -203,9 +205,7 @@ async def prepare_presentation(
             presentation_structure.slides[index] = random_slide_index
 
     sql_session.add(presentation)
-    presentation.outlines = PresentationOutlineModel(slides=outlines).model_dump(
-        mode="json"
-    )
+    presentation.outlines = presentation_outline_model.model_dump(mode="json")
     presentation.title = title or presentation.title
     presentation.set_layout(layout)
     presentation.set_structure(presentation_structure)
@@ -443,7 +443,7 @@ async def generate_presentation_api(
             detail="Failed to generate presentation outlines. Please try again.",
         )
     presentation_outlines = PresentationOutlineModel(**presentation_outlines_json)
-    outlines = presentation_outlines.slides[:request.n_slides]
+    outlines = presentation_outlines.slides[: request.n_slides]
     total_outlines = len(outlines)
 
     print("-" * 40)
