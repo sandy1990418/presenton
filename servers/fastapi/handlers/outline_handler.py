@@ -63,26 +63,31 @@ class OutlineHandler(DatabaseMixin, StreamingMixin, ValidationMixin):
                                file_count=len(presentation.file_paths),
                                presentation_id=presentation_id)
                 
-                documents_loader = DocumentsLoader(file_paths=presentation.file_paths)
-                await documents_loader.load_documents(temp_dir)
-                documents = documents_loader.documents
-                
-                if documents:
-                    additional_context = documents[0]
-                    chunker = ScoreBasedChunker()
+                try:
+                    documents_loader = DocumentsLoader(file_paths=presentation.file_paths)
+                    await documents_loader.load_documents(temp_dir)
+                    documents = documents_loader.documents
                     
-                    try:
-                        chunks = await chunker.get_n_chunks(documents[0], presentation.n_slides)
-                        presentation_outlines = PresentationOutlineModel(
-                            slides=[chunk.to_slide_outline() for chunk in chunks]
-                        )
-                        self.logger.info("Generated outlines from document chunks", 
-                                       chunk_count=len(chunks),
-                                       presentation_id=presentation_id)
-                    except Exception as e:
-                        self.logger.exception("Failed to process document chunks", 
+                    if documents:
+                        additional_context = documents[0]
+                        chunker = ScoreBasedChunker()
+                        
+                        try:
+                            chunks = await chunker.get_n_chunks(documents[0], presentation.n_slides)
+                            presentation_outlines = PresentationOutlineModel(
+                                slides=[chunk.to_slide_outline() for chunk in chunks]
+                            )
+                            self.logger.info("Generated outlines from document chunks", 
+                                           chunk_count=len(chunks),
                                            presentation_id=presentation_id)
-                        # Continue with LLM-based outline generation
+                        except Exception as e:
+                            self.logger.exception("Failed to process document chunks", 
+                                               presentation_id=presentation_id)
+                            # Continue with LLM-based outline generation
+                except Exception as e:
+                    self.logger.exception("Failed to load documents, continuing with standard generation", 
+                                        presentation_id=presentation_id)
+                    yield await self.yield_status_update("Warning: Some files could not be loaded, continuing with standard generation...")
             
             # Generate outlines using LLM if not already done
             if not presentation_outlines:

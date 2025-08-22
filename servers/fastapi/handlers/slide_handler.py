@@ -46,7 +46,7 @@ class SlideHandler(DatabaseMixin, AssetServicesMixin, ValidationMixin):
         try:
             # Validate inputs
             self.validate_string_length(slide_id, "slide_id", min_length=1)
-            self.validate_string_length(prompt, "prompt", min_length=1, max_length=2000)
+            self.validate_string_length(prompt, "prompt", min_length=1, max_length=2000, allow_empty=True)
             
             # Get slide and presentation
             slide = await self.get_or_404(SlideModel, slide_id, "Slide not found")
@@ -125,7 +125,7 @@ class SlideHandler(DatabaseMixin, AssetServicesMixin, ValidationMixin):
         try:
             # Validate inputs
             self.validate_string_length(slide_id, "slide_id", min_length=1)
-            self.validate_string_length(prompt, "prompt", min_length=1, max_length=2000)
+            self.validate_string_length(prompt, "prompt", min_length=1, max_length=2000, allow_empty=True)
             
             # Get slide
             slide = await self.get_or_404(SlideModel, slide_id, "Slide not found")

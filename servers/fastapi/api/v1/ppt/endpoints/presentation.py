@@ -154,9 +154,10 @@ async def create_pptx(
     """Export presentation as PPTX file."""
     # Create temporary handler for PPTX export (doesn't need database session)
     from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-    from services.database import get_database_url
+    from utils.db_utils import get_database_url_and_connect_args
     
-    engine = create_async_engine(get_database_url())
+    database_url, connect_args = get_database_url_and_connect_args()
+    engine = create_async_engine(database_url, connect_args=connect_args)
     async with AsyncSession(engine) as session:
         handler = PresentationHandler(session)
         return await handler.create_pptx_export(pptx_model)

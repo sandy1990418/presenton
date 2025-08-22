@@ -769,7 +769,7 @@ class SlideToHtmlHandler(DatabaseMixin, ValidationMixin):
             
             # Validate inputs
             self.validate_string_length(html_content, "html_content", min_length=1, max_length=100000)
-            self.validate_string_length(prompt, "prompt", min_length=1, max_length=2000)
+            self.validate_string_length(prompt, "prompt", min_length=1, max_length=2000, allow_empty=True)
             
             # Validate current UI image
             if not current_ui_image.content_type or not current_ui_image.content_type.startswith("image/"):

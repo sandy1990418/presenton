@@ -80,7 +80,7 @@ class ValidationMixin(LoggingMixin):
                 detail=f"{field_name} must be a valid integer"
             )
     
-    def validate_string_length(self, value: str, field_name: str, min_length: int = 0, max_length: Optional[int] = None) -> str:
+    def validate_string_length(self, value: str, field_name: str, min_length: int = 0, max_length: Optional[int] = None, allow_empty: bool = False) -> str:
         """
         Validate string length constraints.
         
@@ -89,6 +89,7 @@ class ValidationMixin(LoggingMixin):
             field_name: Field name for error messages
             min_length: Minimum length (default: 0)
             max_length: Maximum length (optional)
+            allow_empty: If True, allows empty strings even if min_length > 0
             
         Returns:
             Validated string value
@@ -102,6 +103,10 @@ class ValidationMixin(LoggingMixin):
                 status_code=400,
                 detail=f"{field_name} must be a string"
             )
+        
+        # Special handling for empty strings when allow_empty is True
+        if allow_empty and not value.strip():
+            return value
         
         if len(value) < min_length:
             self.log_validation_error(field_name, len(value), f"String too short, minimum {min_length}")

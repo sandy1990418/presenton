@@ -210,7 +210,7 @@ class PresentationHandler(DatabaseMixin, AssetServicesMixin, StreamingMixin, Val
         
         try:
             # Validate inputs
-            self.validate_string_length(prompt, "prompt", min_length=1, max_length=5000)
+            self.validate_string_length(prompt, "prompt", min_length=1, max_length=5000, allow_empty=True)
             n_slides = self.validate_positive_integer(n_slides, "n_slides", min_value=1)
             language = self.validate_language_code(language)
             file_paths = self.validate_file_paths(file_paths)
