@@ -95,7 +95,6 @@ async def create_presentation(
     n_slides: Annotated[int, Body()],
     language: Annotated[str, Body()],
     file_paths: Annotated[Optional[List[str]], Body()] = None,
-    web_search_enabled: Annotated[bool, Body()] = False,
     sql_session: AsyncSession = Depends(get_async_session),
 ):
     """Create a new presentation."""
@@ -104,8 +103,7 @@ async def create_presentation(
         prompt=prompt,
         n_slides=n_slides,
         language=language,
-        file_paths=file_paths,
-        web_search_enabled=web_search_enabled
+        file_paths=file_paths
     )
 
 

@@ -84,7 +84,8 @@ class LLMClient:
 
     # ? Disable thinking
     def disable_thinking(self) -> bool:
-        return parse_bool_or_none(get_disable_thinking_env()) or False
+        disabled = parse_bool_or_none(get_disable_thinking_env()) or False
+        return disabled
 
     # ? Clients
     def _get_client(self):

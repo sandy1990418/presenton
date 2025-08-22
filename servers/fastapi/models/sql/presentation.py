@@ -21,7 +21,6 @@ class PresentationModel(SQLModel, table=True):
     updated_at: datetime = Field(sa_column=Column(DateTime, default=datetime.now))
     layout: Optional[dict] = Field(sa_column=Column(JSON), default=None)
     structure: Optional[dict] = Field(sa_column=Column(JSON), default=None)
-    web_search_enabled: bool = Field(default=False)
 
     def get_new_presentation(self):
         return PresentationModel(
@@ -34,7 +33,6 @@ class PresentationModel(SQLModel, table=True):
             outlines=self.outlines,
             layout=self.layout,
             structure=self.structure,
-            web_search_enabled=self.web_search_enabled,
         )
 
     def get_presentation_outline(self):

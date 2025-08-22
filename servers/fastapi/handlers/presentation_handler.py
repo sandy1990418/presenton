@@ -29,6 +29,7 @@ from utils.llm_calls.generate_slide_content import get_slide_content_from_type_a
 from utils.process_slides import process_slide_and_fetch_assets, convert_file_path_to_web_url
 from utils.randomizers import get_random_uuid
 from utils.asset_directory_utils import get_exports_directory
+from services.llm_client import LLMClient
 from services.pptx_presentation_creator import PptxPresentationCreator
 from services import TEMP_FILE_SERVICE
 
@@ -190,8 +191,7 @@ class PresentationHandler(DatabaseMixin, AssetServicesMixin, StreamingMixin, Val
         prompt: str, 
         n_slides: int, 
         language: str, 
-        file_paths: Optional[List[str]] = None,
-        web_search_enabled: bool = False
+        file_paths: Optional[List[str]] = None
     ) -> PresentationModel:
         """
         Create a new presentation.
@@ -201,12 +201,20 @@ class PresentationHandler(DatabaseMixin, AssetServicesMixin, StreamingMixin, Val
             n_slides: Number of slides
             language: Language code
             file_paths: Optional list of file paths
-            web_search_enabled: Whether web search is enabled (unused for now)
             
         Returns:
             Created PresentationModel
         """
         self.log_request_start("create_presentation", n_slides=n_slides, language=language)
+        
+        # Log feature status
+        llm_client = LLMClient()
+        thinking_disabled = llm_client.disable_thinking()
+        web_grounding_enabled = llm_client.enable_web_grounding()
+        self.logger.info("LLM Feature Status", 
+                        web_grounding_enabled=web_grounding_enabled,
+                        thinking_status="DISABLED" if thinking_disabled else "ENABLED",
+                        llm_provider=str(llm_client.llm_provider.value))
         
         try:
             # Validate inputs

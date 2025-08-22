@@ -4,13 +4,11 @@ import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 interface PresentationGenUploadState {
   config: PresentationConfig | null;
   files: any;
-  webSearchEnabled: boolean;
 }
 
 const initialState: PresentationGenUploadState = {
   config: null,
   files: [],
-  webSearchEnabled: false,
 };
 
 export const presentationGenUploadSlice = createSlice({
@@ -24,7 +22,6 @@ export const presentationGenUploadSlice = createSlice({
       const payload = action.payload;
       if (payload.config !== undefined) state.config = payload.config;
       if (payload.files !== undefined) state.files = payload.files;
-      if (payload.webSearchEnabled !== undefined) state.webSearchEnabled = payload.webSearchEnabled;
     },
    
   },

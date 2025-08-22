@@ -55,7 +55,7 @@ const DocumentsPreviewPage: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Redux state
-  const { config, files, webSearchEnabled } = useSelector(
+  const { config, files } = useSelector(
     (state: RootState) => state.pptGenUpload
   );
 
