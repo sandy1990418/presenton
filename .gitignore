@@ -30,3 +30,8 @@ chroma
 container.db
 .next-build
 .cursor
+mineru.json
+start-dev.js
+temp
+temp*
+.DS_Store
