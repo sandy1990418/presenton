@@ -1,19 +1,17 @@
-import importlib
 from typing import Annotated, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+import uuid
 
 from models.sql.presentation import PresentationModel
 from models.sql.slide import SlideModel
 from services.database import get_async_session
-from services.icon_finder_service import IconFinderService
 from services.image_generation_service import ImageGenerationService
 from utils.asset_directory_utils import get_images_directory
 from utils.llm_calls.edit_slide import get_edited_slide_content
 from utils.llm_calls.edit_slide_html import get_edited_slide_html
 from utils.llm_calls.select_slide_type_on_edit import get_slide_layout_from_prompt
 from utils.process_slides import process_old_and_new_slides_and_fetch_assets
-from utils.randomizers import get_random_uuid
 
 
 SLIDE_ROUTER = APIRouter(prefix="/slide", tags=["Slide"])
@@ -21,14 +19,24 @@ SLIDE_ROUTER = APIRouter(prefix="/slide", tags=["Slide"])
 
 @SLIDE_ROUTER.post("/edit")
 async def edit_slide(
-    id: Annotated[str, Body()],
+    id: Annotated[str, Body()],  # Changed to str for compatibility
     prompt: Annotated[str, Body()],
     sql_session: AsyncSession = Depends(get_async_session),
 ):
-    slide = await sql_session.get(SlideModel, id)
+    try:
+        slide = await sql_session.get(
+            SlideModel, uuid.UUID(id) if isinstance(id, str) else id
+        )
+    except (ValueError, TypeError):
+        slide = await sql_session.get(SlideModel, str(id))
     if not slide:
         raise HTTPException(status_code=404, detail="Slide not found")
-    presentation = await sql_session.get(PresentationModel, slide.presentation)
+    presentation = await sql_session.get(
+        PresentationModel,
+        uuid.UUID(slide.presentation)
+        if isinstance(slide.presentation, str)
+        else slide.presentation,
+    )
     if not presentation:
         raise HTTPException(status_code=404, detail="Presentation not found")
 
@@ -42,18 +50,16 @@ async def edit_slide(
     )
 
     image_generation_service = ImageGenerationService(get_images_directory())
-    icon_finder_service = IconFinderService()
 
     # This will mutate edited_slide_content
     new_assets = await process_old_and_new_slides_and_fetch_assets(
         image_generation_service,
-        icon_finder_service,
         slide.content,
         edited_slide_content,
     )
 
     # Always assign a new unique id to the slide
-    slide.id = get_random_uuid()
+    slide.id = uuid.uuid4()
 
     sql_session.add(slide)
     slide.content = edited_slide_content
@@ -72,7 +78,12 @@ async def edit_slide_html(
     html: Annotated[Optional[str], Body()] = None,
     sql_session: AsyncSession = Depends(get_async_session),
 ):
-    slide = await sql_session.get(SlideModel, id)
+    try:
+        slide = await sql_session.get(
+            SlideModel, uuid.UUID(id) if isinstance(id, str) else id
+        )
+    except (ValueError, TypeError):
+        slide = await sql_session.get(SlideModel, str(id))
     if not slide:
         raise HTTPException(status_code=404, detail="Slide not found")
 
@@ -84,7 +95,7 @@ async def edit_slide_html(
 
     # Always assign a new unique id to the slide
     # This is to ensure that the nextjs can track slide updates
-    slide.id = get_random_uuid()
+    slide.id = uuid.uuid4()
 
     sql_session.add(slide)
     slide.html_content = edited_slide_html

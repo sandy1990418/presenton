@@ -79,39 +79,3 @@ export function getLocalImagePath(imageUrl: string | undefined): string {
   return '/static/images/placeholder.jpg';
 }
 
-/**
- * Check if running in offline mode (no internet connection)
- * This is a simple heuristic - in production you might want more sophisticated detection
- */
-export function isOfflineMode(): boolean {
-  if (typeof window !== 'undefined') {
-    return !navigator.onLine;
-  }
-  return false;
-}
-
-/**
- * Get image source with offline support
- * @param imageData - Image data object with __image_url__ property
- * @returns Appropriate image source for current environment
- */
-export function getImageSrc(imageData: any): string {
-  if (!imageData || !imageData.__image_url__) {
-    return '/static/images/placeholder.jpg';
-  }
-
-  const imageUrl = imageData.__image_url__;
-  
-  // Always use local path conversion for better offline support
-  return getLocalImagePath(imageUrl);
-}
-
-/**
- * Convert a backend file path to a frontend-accessible URL for offline environments
- * This is a convenience function that wraps getLocalImagePath for direct string usage
- * @param imagePath - The image path from the backend
- * @returns A frontend-accessible URL or fallback placeholder
- */
-export function convertImagePathForOffline(imagePath: string): string {
-  return getLocalImagePath(imagePath);
-}

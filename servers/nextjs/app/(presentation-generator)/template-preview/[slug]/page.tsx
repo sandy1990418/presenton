@@ -19,7 +19,7 @@ import { trackEvent, MixpanelEvent } from "@/utils/mixpanel";
 const GroupLayoutPreview = () => {
   const params = useParams();
   const router = useRouter();
-  const slug = params.slug as string;
+  const slug = params?.slug as string;
   const pathname = usePathname();
 
   const { getFullDataByGroup, loading, refetch } = useLayout();
@@ -138,7 +138,7 @@ const GroupLayoutPreview = () => {
       const payload = {
         layouts: [
           {
-            presentation_id: presentationId,
+            presentation: presentationId,
             layout_id: currentLayoutId,
             layout_name: currentLayoutName,
             layout_code: currentCode,

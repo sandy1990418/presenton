@@ -6,6 +6,7 @@ between extracted images and presentation content.
 """
 
 import logging
+import uuid
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Form
 from fastapi.responses import JSONResponse
@@ -39,7 +40,7 @@ async def process_extracted_images(
     """
     try:
         # Get presentation
-        presentation = await sql_session.get(PresentationModel, presentation_id)
+        presentation = await sql_session.get(PresentationModel, uuid.UUID(presentation_id) if isinstance(presentation_id, str) else presentation_id)
         if not presentation:
             raise HTTPException(status_code=404, detail="Presentation not found")
         
@@ -137,7 +138,7 @@ async def upload_image_blobs(
     """
     try:
         # Get presentation
-        presentation = await sql_session.get(PresentationModel, presentation_id)
+        presentation = await sql_session.get(PresentationModel, uuid.UUID(presentation_id) if isinstance(presentation_id, str) else presentation_id)
         if not presentation:
             raise HTTPException(status_code=404, detail="Presentation not found")
         
@@ -235,7 +236,7 @@ async def match_single_image(
     """
     try:
         # Get presentation
-        presentation = await sql_session.get(PresentationModel, presentation_id)
+        presentation = await sql_session.get(PresentationModel, uuid.UUID(presentation_id) if isinstance(presentation_id, str) else presentation_id)
         if not presentation:
             raise HTTPException(status_code=404, detail="Presentation not found")
         
@@ -309,7 +310,7 @@ async def process_reference_document(
     """
     try:
         # Get presentation
-        presentation = await sql_session.get(PresentationModel, presentation_id)
+        presentation = await sql_session.get(PresentationModel, uuid.UUID(presentation_id) if isinstance(presentation_id, str) else presentation_id)
         if not presentation:
             raise HTTPException(status_code=404, detail="Presentation not found")
         
@@ -402,7 +403,7 @@ async def get_presentation_citations(
     """
     try:
         # Verify presentation exists
-        presentation = await sql_session.get(PresentationModel, presentation_id)
+        presentation = await sql_session.get(PresentationModel, uuid.UUID(presentation_id) if isinstance(presentation_id, str) else presentation_id)
         if not presentation:
             raise HTTPException(status_code=404, detail="Presentation not found")
         
@@ -437,7 +438,7 @@ async def get_slide_citations(
     """
     try:
         # Verify presentation exists
-        presentation = await sql_session.get(PresentationModel, presentation_id)
+        presentation = await sql_session.get(PresentationModel, uuid.UUID(presentation_id) if isinstance(presentation_id, str) else presentation_id)
         if not presentation:
             raise HTTPException(status_code=404, detail="Presentation not found")
         

@@ -50,13 +50,13 @@ export class PresentationGenerationApi {
   }
  
     static async createPresentation({
-    prompt,
+    content,
     n_slides,
     file_paths,
     language,
     web_search_enabled,
   }: {
-    prompt: string;
+    content: string;
     n_slides: number | null;
     file_paths?: string[];
     language: string | null;
@@ -72,7 +72,7 @@ export class PresentationGenerationApi {
           method: "POST",
           headers: getHeader(),
           body: JSON.stringify({
-            prompt,
+            content,
             n_slides,
             file_paths,
             language,

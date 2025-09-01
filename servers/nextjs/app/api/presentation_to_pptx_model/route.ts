@@ -116,8 +116,9 @@ async function postProcessSlidesAttributes(slidesAttributes: SlideAttributesResu
 }
 
 async function screenshotElement(element: ElementAttributes, screenshotsDir: string) {
+  const screenshotPath = path.join(screenshotsDir, `${uuidv4()}.png`) as `${string}.png`;
+  
   try {
-    const screenshotPath = path.join(screenshotsDir, `${uuidv4()}.png`) as `${string}.png`;
 
     // For SVG elements, use convertSvgToPng
     if (element.tagName === 'svg') {

@@ -1,7 +1,6 @@
 import React from "react";
 import * as z from "zod";
 import { ImageSchema, IconSchema } from "@/presentation-templates/defaultSchemes";
-import OfflineImage from "@/components/ui/OfflineImage";
 
 export const layoutId = "about-company-slide";
 export const layoutName = "About Our Company Slide";
@@ -70,10 +69,15 @@ const AboutCompanySlideLayout: React.FC<AboutCompanySlideLayoutProps> = ({
           {/* Left side - Image */}
           <div className="flex-1 pr-16 flex items-center pt-8">
             <div className="w-full h-96 overflow-hidden">
-              {slideData?.image ? (
-                <OfflineImage
-                  imageData={slideData.image}
+              {slideData?.image && slideData.image.__image_url__ ? (
+                <img
+                  src={slideData.image.__image_url__}
+                  alt={slideData.image.__image_prompt__ || "Company image"}
                   className="w-full h-full object-cover"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                  }}
                 />
               ) : (
                 /* Default building facade */

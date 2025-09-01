@@ -1,113 +1,86 @@
-import logging
-import asyncio
+from datetime import datetime
 from typing import Optional
 
 from models.llm_message import LLMSystemMessage, LLMUserMessage
-from models.llm_tools import GetCurrentDatetimeTool, SearchWebTool
+from models.llm_tools import SearchWebTool
 from services.llm_client import LLMClient
 from utils.get_dynamic_models import get_presentation_outline_model_with_n_slides
+from utils.llm_client_error_handler import handle_llm_client_exceptions
 from utils.llm_provider import get_model
 
-logger = logging.getLogger(__name__)
 
-system_prompt = """
-    You are an expert presentation creator. Generate structured presentations based on user requirements and format them according to the specified JSON schema with markdown content.
-
-    ## Core Requirements
-
-    ### Input Processing
-    1. **Extract key information** from the user's prompt:
-    - Main topic/subject matter
-    - Required number of slides
-    - Target language for output
-    - Specific content requirements or focus areas
-    - Target audience (if specified)
-    - Presentation style or tone preferences
-
-    ## Content Generation Guidelines
-
-    ### Presentation Title
-    - Create a **concise, descriptive title** that captures the essence of the topic
-    - Use **plain text format** (no markdown formatting)
-    - Make it **engaging and professional**
-    - Ensure it reflects the main theme and target audience
-
-    ### Slide Titles
-    - Generate **clear, specific titles** for each slide
-    - Use **plain text format** (no markdown, no "Slide 1", "Slide 2" prefixes)
-    - Make each title **descriptive and informative**
-    - Ensure titles create a **logical flow** through the presentation
-    - Keep titles **concise but meaningful**
-
-    ### Slide Body Content
-    - Use **structured markdown format** with topic headings and bullet points
-    - Structure should be: "## Topic\n- first point\n- second point"
-    - Make content **comprehensive and detailed** rather than single-line summaries
-    - Ensure each slide has **3-5 key points** under relevant topic headings
-    - Use **hierarchical structure** with H2 headings for main topics and bullet points for details
-
-    ### Mermaid Diagram Integration
-    - **Automatically include mermaid diagrams** when content involves:
-    - Processes, workflows, or step-by-step procedures
-    - Organizational structures or hierarchies
-    - Decision trees or conditional logic
-    - System architectures or data flows
-    - Timelines or project phases
-    - **Supported Mermaid formats**: graph LR/TD/TB, flowchart LR/TD, sequenceDiagram, classDiagram, gitgraph, timeline, journey
-    - Keep diagrams **simple and readable** with clear node connections
-    - Use **descriptive, concise node labels** (avoid long text in nodes)
-    - **Syntax requirements**: 
-    - Proper node declarations: A[Text], B{Decision}, C((Circle))
-    - Valid connections: -->, ---|, ==>, -.->
-    - Escape special characters in labels
-    - For mermaid slides, set slide body to: "This slide contains a [diagram type] showing [brief description]"
-
-    ## Special Considerations
-
-    ### Slide Count Compliance
-    - Generate **exactly** the number of slides requested
-    - Distribute content **evenly** across slides
-    - **At least 20% of slides should include mermaid diagrams** when the topic involves processes or systems
-    - Create **balanced information flow**
-    Try to use available tools for better results.
-
-    - Provide content for each slide in markdown format.
-    - Make sure that flow of the presentation is logical and consistent.
-    - Place greater emphasis on numerical data.
-    - If Additional Information is provided, divide it into slides.
-    - Make sure no images are provided in the content.
-    - Make sure that content follows language guidelines.
-"""
-
-
-def get_user_prompt(prompt: str, n_slides: int, language: str, content: str):
+def get_system_prompt(
+    tone: Optional[str] = None,
+    verbosity: Optional[str] = None,
+    instructions: Optional[str] = None,
+):
     return f"""
-        **Input:**
-        - Prompt: {prompt}
-        - Output Language: {language}
-        - Number of Slides: {n_slides}
-        - Additional Information: {content}
+        You are an expert presentation creator. Generate structured presentations based on user requirements and format them according to the specified JSON schema with markdown content.
+
+        Try to use available tools for better results.
+
+        {"# User Instruction:" if instructions else ""}
+        {instructions or ""}
+
+        {"# Tone:" if tone else ""}
+        {tone or ""}
+
+        {"# Verbosity:" if verbosity else ""}
+        {verbosity or ""}
+
+        - Provide content for each slide in markdown format.
+        - Make sure that flow of the presentation is logical and consistent.
+        - Place greater emphasis on numerical data.
+        - If Additional Information is provided, divide it into slides.
+        - Make sure no images are provided in the content.
+        - Make sure that content follows language guidelines.
     """
 
 
-def get_messages(prompt: str, n_slides: int, language: str, content: str):
+def get_user_prompt(
+    content: str,
+    n_slides: int,
+    language: str,
+    additional_context: Optional[str] = None,
+):
+    return f"""
+        **Input:**
+        - User provided content: {content}
+        - Output Language: {language}
+        - Number of Slides: {n_slides}
+        - Current Date and Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        - Additional Information: {additional_context or ""}
+    """
+
+
+def get_messages(
+    content: str,
+    n_slides: int,
+    language: str,
+    additional_context: Optional[str] = None,
+    tone: Optional[str] = None,
+    verbosity: Optional[str] = None,
+    instructions: Optional[str] = None,
+):
     return [
         LLMSystemMessage(
-            content=system_prompt,
+            content=get_system_prompt(tone, verbosity, instructions),
         ),
         LLMUserMessage(
-            content=get_user_prompt(prompt, n_slides, language, content),
+            content=get_user_prompt(content, n_slides, language, additional_context),
         ),
     ]
 
 
 async def generate_ppt_outline(
-    prompt: Optional[str],
+    content: str,
     n_slides: int,
     language: Optional[str] = None,
-    content: Optional[str] = None,
-    web_search_enabled: bool = False,
-    presentation_id: Optional[str] = None,
+    additional_context: Optional[str] = None,
+    tone: Optional[str] = None,
+    verbosity: Optional[str] = None,
+    instructions: Optional[str] = None,
+    web_search: bool = False,
 ):
     model = get_model()
     response_model = get_presentation_outline_model_with_n_slides(n_slides)
@@ -297,13 +270,26 @@ async def generate_ppt_outline(
     #             yield json.dumps(fallback_outline)
     client = LLMClient()
 
-    tools = [SearchWebTool, GetCurrentDatetimeTool]
-
-    async for chunk in client.stream_structured(
-        model,
-        get_messages(prompt, n_slides, language, content),
-        response_model.model_json_schema(),
-        strict=True,
-        tools=tools if client.enable_web_grounding() else None,
-    ):
-        yield chunk
+    try:
+        async for chunk in client.stream_structured(
+            model,
+            get_messages(
+                content,
+                n_slides,
+                language,
+                additional_context,
+                tone,
+                verbosity,
+                instructions,
+            ),
+            response_model.model_json_schema(),
+            strict=True,
+            tools=(
+                [SearchWebTool]
+                if (client.enable_web_grounding() and web_search)
+                else None
+            ),
+        ):
+            yield chunk
+    except Exception as e:
+        yield handle_llm_client_exceptions(e)

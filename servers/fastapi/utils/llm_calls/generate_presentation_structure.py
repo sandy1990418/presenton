@@ -1,14 +1,19 @@
+from typing import Optional
 from models.llm_message import LLMSystemMessage, LLMUserMessage
 from models.presentation_layout import PresentationLayoutModel
 from models.presentation_outline_model import PresentationOutlineModel
 from services.llm_client import LLMClient
+from utils.llm_client_error_handler import handle_llm_client_exceptions
 from utils.llm_provider import get_model
 from utils.get_dynamic_models import get_presentation_structure_model_with_n_slides
 from models.presentation_structure_model import PresentationStructureModel
 
 
 def get_messages(
-    presentation_layout: PresentationLayoutModel, n_slides: int, data: str
+    presentation_layout: PresentationLayoutModel,
+    n_slides: int,
+    data: str,
+    instructions: Optional[str] = None,
 ):
     return [
         LLMSystemMessage(
@@ -46,6 +51,9 @@ def get_messages(
 
                 **Trust your design instincts. Focus on creating the most effective presentation for the content and audience.**
 
+                {"# User Instruction:" if instructions else ""}
+                {instructions or ""}
+
                 Select layout index for each of the {n_slides} slides based on what will best serve the presentation's goals.
             """,
         ),
@@ -60,6 +68,7 @@ def get_messages(
 async def generate_presentation_structure(
     presentation_outline: PresentationOutlineModel,
     presentation_layout: PresentationLayoutModel,
+    instructions: Optional[str] = None,
 ) -> PresentationStructureModel:
 
     client = LLMClient()
@@ -68,14 +77,18 @@ async def generate_presentation_structure(
         len(presentation_outline.slides)
     )
 
-    response = await client.generate_structured(
-        model=model,
-        messages=get_messages(
-            presentation_layout,
-            len(presentation_outline.slides),
-            presentation_outline.to_string(),
-        ),
-        response_format=response_model.model_json_schema(),
-        strict=True,
-    )
-    return PresentationStructureModel(**response)
+    try:
+        response = await client.generate_structured(
+            model=model,
+            messages=get_messages(
+                presentation_layout,
+                len(presentation_outline.slides),
+                presentation_outline.to_string(),
+                instructions,
+            ),
+            response_format=response_model.model_json_schema(),
+            strict=True,
+        )
+        return PresentationStructureModel(**response)
+    except Exception as e:
+        raise handle_llm_client_exceptions(e)

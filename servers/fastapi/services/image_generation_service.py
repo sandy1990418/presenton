@@ -15,7 +15,7 @@ from utils.image_provider import (
     is_gemini_flash_selected,
     is_dalle3_selected,
 )
-from utils.randomizers import get_random_uuid
+import uuid
 
 
 class ImageGenerationService:
@@ -68,6 +68,7 @@ class ImageGenerationService:
                 elif os.path.exists(image_path):
                     return ImageAsset(
                         path=image_path,
+                        is_uploaded=False,
                         extras={
                             "prompt": prompt.prompt,
                             "theme_prompt": prompt.theme_prompt,
@@ -95,7 +96,7 @@ class ImageGenerationService:
         client = genai.Client()
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-2.0-flash-preview-image-generation",
+            model="gemini-2.5-flash-image-preview",
             contents=[prompt],
             config=GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
         )
@@ -104,7 +105,7 @@ class ImageGenerationService:
             if part.text is not None:
                 print(part.text)
             elif part.inline_data is not None:
-                image_path = os.path.join(output_directory, f"{get_random_uuid()}.jpg")
+                image_path = os.path.join(output_directory, f"{uuid.uuid4()}.jpg")
                 with open(image_path, "wb") as f:
                     f.write(part.inline_data.data)
 
