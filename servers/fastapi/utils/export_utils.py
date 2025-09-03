@@ -40,23 +40,20 @@ async def export_presentation(
         await pptx_creator.create_ppt()
 
         export_directory = get_exports_directory()
-        sanitized_title = sanitize_filename(title or get_random_uuid()).replace(' ', '_')
+        sanitized_title = sanitize_filename(title or str(uuid.uuid4())).replace(' ', '_')
         pptx_path = os.path.join(
             export_directory,
             f"{sanitize_filename(title or str(uuid.uuid4()))}.pptx",
         )
         pptx_creator.save(pptx_path)
 
-        # Return download URL instead of file path
-        filename = os.path.basename(pptx_path)
-        download_url = f"/api/download/{filename}"
-        
+        # Return the file path for direct download
         return PresentationAndPath(
             presentation_id=presentation_id,
-            path=download_url,
+            path=pptx_path,
         )
     else:
-        sanitized_title = sanitize_filename(title or get_random_uuid()).replace(' ', '_')
+        sanitized_title = sanitize_filename(title or str(uuid.uuid4())).replace(' ', '_')
         pdf_filename = f"{sanitized_title}.pdf"
         export_directory = get_exports_directory()
         pdf_path = os.path.join(export_directory, pdf_filename)

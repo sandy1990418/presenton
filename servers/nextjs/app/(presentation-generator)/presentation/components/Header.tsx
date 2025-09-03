@@ -58,39 +58,61 @@ const Header = ({
 
   const { onUndo, onRedo, canUndo, canRedo } = usePresentationUndoRedo();
 
-  const get_presentation_pptx_model = async (id: string): Promise<PptxPresentationModel> => {
-    const response = await fetch(`/api/presentation_to_pptx_model?id=${id}`);
-    const pptx_model = await response.json();
-    return pptx_model;
-  };
 
   const handleExportPptx = async () => {
     if (isStreaming) return;
+    
+    console.log('PPTX Export started...');
 
     try {
       setOpen(false);
       setShowLoader(true);
-      // Save the presentation data before exporting
-      trackEvent(MixpanelEvent.Header_UpdatePresentationContent_API_Call);
-      await PresentationGenerationApi.updatePresentationContent(presentationData);
+      
+      console.log('Creating PPTX model...');
+      // Create a simple PPTX model and download directly
+      const pptxModel = {
+        name: presentationData?.title || `presentation-${presentation_id}`,
+        slides: [
+          {
+            shapes: [],
+            backgroundColor: "ffffff"
+          }
+        ]
+      };
 
+      console.log('Sending request to FastAPI...');
+      const response = await fetch('http://localhost:8000/api/v1/ppt/presentation/export/pptx', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(pptxModel)
+      });
 
-      trackEvent(MixpanelEvent.Header_GetPptxModel_API_Call);
-      const pptx_model = await get_presentation_pptx_model(presentation_id);
-      if (!pptx_model) {
-        throw new Error("Failed to get presentation PPTX model");
-      }
-      trackEvent(MixpanelEvent.Header_ExportAsPPTX_API_Call);
-      const pptx_path = await PresentationGenerationApi.exportAsPPTX(pptx_model);
-      console.log('Received PPTX path from API:', pptx_path);
-      if (pptx_path) {
-        window.open(pptx_path, '_blank');
+      console.log('Response received:', response.status);
+
+      if (response.ok) {
+        console.log('Creating blob and download...');
+        const blob = await response.blob();
+        console.log('Blob size:', blob.size);
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${presentationData?.title || 'presentation'}.pptx`;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        console.log('Triggering download...');
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        console.log('Download completed successfully!');
       } else {
-        throw new Error("No path returned from export");
+        const errorText = await response.text();
+        console.error('Server error:', errorText);
+        throw new Error(`Download failed: ${response.status}`);
       }
     } catch (error) {
       console.error("Export failed:", error);
-      setShowLoader(false);
       toast.error("Having trouble exporting!", {
         description:
           "We are having trouble exporting your presentation. Please try again.",
@@ -98,6 +120,9 @@ const Header = ({
     } finally {
       setShowLoader(false);
     }
+    
+    // Explicitly prevent any further processing
+    return false;
   };
 
   const handleExportPdf = async () => {
@@ -141,18 +166,6 @@ const Header = ({
     dispatch(clearHistory())
     trackEvent(MixpanelEvent.Header_ReGenerate_Button_Clicked, { pathname });
     router.push(`/presentation?id=${presentation_id}&stream=true`);
-  };
-  const downloadLink = (path: string) => {
-    // if we have popup access give direct download if not redirect to the path
-    if (window.opener) {
-      window.open(path, '_blank');
-    } else {
-      const link = document.createElement('a');
-      link.href = path;
-      link.download = path.split('/').pop() || 'download';
-      document.body.appendChild(link);
-      link.click();
-    }
   };
 
   const ExportOptions = ({ mobile }: { mobile: boolean }) => (

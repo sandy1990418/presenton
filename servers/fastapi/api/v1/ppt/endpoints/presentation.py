@@ -4,7 +4,7 @@ import os
 import random
 from typing import Annotated, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -369,7 +369,7 @@ async def update_presentation(
     )
 
 
-@PRESENTATION_ROUTER.post("/export/pptx", response_model=str)
+@PRESENTATION_ROUTER.post("/export/pptx")
 async def create_pptx(
     pptx_model: Annotated[PptxPresentationModel, Body()],
 ):
@@ -379,12 +379,16 @@ async def create_pptx(
     await pptx_creator.create_ppt()
 
     export_directory = get_exports_directory()
-    pptx_path = os.path.join(
-        export_directory, f"{pptx_model.name or uuid.uuid4()}.pptx"
-    )
+    filename = f"{pptx_model.name or uuid.uuid4()}.pptx"
+    pptx_path = os.path.join(export_directory, filename)
     pptx_creator.save(pptx_path)
 
-    return pptx_path
+    # Return file directly for download
+    return FileResponse(
+        pptx_path,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=filename
+    )
 
 
 @PRESENTATION_ROUTER.post("/generate", response_model=PresentationPathAndEditPath)
