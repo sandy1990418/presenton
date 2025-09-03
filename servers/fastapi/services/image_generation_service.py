@@ -16,6 +16,7 @@ from utils.image_provider import (
     is_dalle3_selected,
 )
 import uuid
+# from services.external_api_image_service import EXTERNAL_API_IMAGE_SERVICE
 
 
 class ImageGenerationService:
@@ -46,6 +47,22 @@ class ImageGenerationService:
         otherwise it uses the full image prompt with theme.
         - Output Directory is used for saving the generated image not the stock provider.
         """
+        
+        # # Check if external API endpoint is specified in the prompt
+        # if hasattr(prompt, "external_api_endpoint") and prompt.external_api_endpoint:
+        #     try:
+        #         print(f"Using external API for image generation: {prompt.external_api_endpoint}")
+        #         image_url = await EXTERNAL_API_IMAGE_SERVICE.fetch_image_from_external_api(
+        #             prompt=prompt.prompt,
+        #             api_endpoint=prompt.external_api_endpoint,
+        #             headers=getattr(prompt, "api_headers", {})
+        #         )
+        #         print(f"External API returned image URL: {image_url}")
+        #         return image_url
+        #     except Exception as e:
+        #         print(f"External API failed, falling back to default provider: {e}")
+        #         # Continue with default logic as fallback
+        
         if not self.image_gen_func:
             print("No image generation function found. Using placeholder image.")
             return "/static/images/placeholder.jpg"
@@ -96,7 +113,7 @@ class ImageGenerationService:
         client = genai.Client()
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-2.5-flash-image-preview",
+            model="gemini-2.0-flash-image-preview",
             contents=[prompt],
             config=GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
         )
