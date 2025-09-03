@@ -83,8 +83,11 @@ class ImageGenerationService:
                 if image_path.startswith("http"):
                     return image_path
                 elif os.path.exists(image_path):
+                    # Convert local path to static file URL
+                    filename = os.path.basename(image_path)
+                    static_url = f"http://localhost:8000/app_data/images/{filename}"
                     return ImageAsset(
-                        path=image_path,
+                        path=static_url,
                         is_uploaded=False,
                         extras={
                             "prompt": prompt.prompt,
@@ -113,7 +116,7 @@ class ImageGenerationService:
         client = genai.Client()
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-2.0-flash-image-preview",
+            model="gemini-2.0-flash-preview-image-generation",
             contents=[prompt],
             config=GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
         )
