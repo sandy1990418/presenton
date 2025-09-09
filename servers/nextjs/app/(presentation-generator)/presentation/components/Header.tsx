@@ -68,43 +68,32 @@ const Header = ({
       setOpen(false);
       setShowLoader(true);
       
-      console.log('Creating PPTX model...');
-      // Create a simple PPTX model and download directly
-      const pptxModel = {
-        name: presentationData?.title || `presentation-${presentation_id}`,
-        slides: [
-          {
-            shapes: [],
-            backgroundColor: "ffffff"
-          }
-        ]
-      };
-
-      console.log('Sending request to FastAPI...');
-      const response = await fetch('http://localhost:8000/api/v1/ppt/presentation/export/pptx', {
+      console.log('Exporting presentation using existing export endpoint...');
+      // Use the existing export endpoint that handles real presentation data
+      const response = await fetch(`http://localhost:8000/api/v1/ppt/presentation/export`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(pptxModel)
+        body: JSON.stringify({
+          id: presentation_id,
+          export_as: "pptx"
+        })
       });
 
       console.log('Response received:', response.status);
 
       if (response.ok) {
-        console.log('Creating blob and download...');
-        const blob = await response.blob();
-        console.log('Blob size:', blob.size);
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${presentationData?.title || 'presentation'}.pptx`;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        console.log('Triggering download...');
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
+        console.log('Getting export result...');
+        const result = await response.json();
+        console.log('Export result:', result);
+        
+        // The result contains the file path, convert to download URL
+        const filename = result.path.split('/').pop();
+        const downloadUrl = `http://localhost:8000/exports/${filename}`;
+        
+        console.log('Downloading from:', downloadUrl);
+        window.open(downloadUrl, '_blank');
         console.log('Download completed successfully!');
       } else {
         const errorText = await response.text();
