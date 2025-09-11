@@ -8,7 +8,10 @@ from utils.llm_provider import get_model
 from utils.get_dynamic_models import get_presentation_structure_model_with_n_slides
 from models.presentation_structure_model import PresentationStructureModel
 
-
+# - Processes/workflows/systems → **Text/bullet layouts** (avoid diagram layouts)
+# - Organizational structures → **Text/bullet layouts** for hierarchy descriptions
+# - Decision trees/logic flows → **Text/bullet layouts** for step descriptions
+# - Step-by-step procedures → **Text/bullet layouts** for process descriptions
 def get_messages(
     presentation_layout: PresentationLayoutModel,
     n_slides: int,
