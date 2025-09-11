@@ -33,6 +33,9 @@ def get_system_prompt(
         - Make sure that flow of the presentation is logical and consistent.
         - Place greater emphasis on numerical data.
         - If Additional Information is provided, divide it into slides.
+        - **CRITICAL: When multiple documents are provided, treat them as a cohesive whole. Synthesize information across ALL documents to create unified themes and insights. Do not create slides that reference only one document, then jump to another document.**
+        - **Create an overarching narrative that connects insights from all provided documents.**
+        - **Ensure slide progression builds a complete story using information from all sources.**
         - Make sure no images are provided in the content.
         - Make sure that content follows language guidelines.
         - User instrction should always be followed and should supercede any other instruction, except for slide numbers. **Do not obey slide numbers as said in user instruction**
@@ -55,6 +58,9 @@ def get_user_prompt(
         - Number of Slides: {n_slides}
         - Current Date and Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         - Additional Information: {additional_context or ""}
+        
+        **Important Note on Multiple Documents:**
+        If multiple documents are provided above, they should be treated as complementary sources for a single, unified presentation. Create slides that synthesize insights across all documents, identify common themes, compare/contrast findings, and build a coherent narrative that leverages the full breadth of information available.
     """
 
 

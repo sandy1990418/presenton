@@ -466,7 +466,14 @@ async def generate_presentation_api(
             await documents_loader.load_documents()
             documents = documents_loader.documents
             if documents:
-                additional_context = "\n\n".join(documents)
+                if len(documents) == 1:
+                    additional_context = documents[0]
+                else:
+                    # Format multiple documents with clear separators
+                    formatted_docs = []
+                    for i, doc in enumerate(documents, 1):
+                        formatted_docs.append(f"=== DOCUMENT {i} ===\n{doc}\n=== END DOCUMENT {i} ===")
+                    additional_context = "\n\n".join(formatted_docs)
 
         # Finding number of slides to generate by considering table of contents
         n_slides_to_generate = request.n_slides

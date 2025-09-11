@@ -45,7 +45,14 @@ async def stream_outlines(
             await documents_loader.load_documents(temp_dir)
             documents = documents_loader.documents
             if documents:
-                additional_context = "\n\n".join(documents)
+                if len(documents) == 1:
+                    additional_context = documents[0]
+                else:
+                    # Format multiple documents with clear separators
+                    formatted_docs = []
+                    for i, doc in enumerate(documents, 1):
+                        formatted_docs.append(f"=== DOCUMENT {i} ===\n{doc}\n=== END DOCUMENT {i} ===")
+                    additional_context = "\n\n".join(formatted_docs)
 
         presentation_outlines_text = ""
 
@@ -82,7 +89,7 @@ async def stream_outlines(
 
         try:
             presentation_outlines_json = json.loads(presentation_outlines_text)
-        except Exception as e:
+        except Exception:
             raise HTTPException(
                 status_code=400,
                 detail="Failed to generate presentation outlines. Please try again.",
