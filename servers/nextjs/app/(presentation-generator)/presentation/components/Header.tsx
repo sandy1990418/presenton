@@ -135,6 +135,7 @@ const Header = ({
 
       if (response.ok) {
         const { path: pdfPath } = await response.json();
+        // Simple direct download
         window.open(pdfPath, '_blank');
       } else {
         throw new Error("Failed to export PDF");

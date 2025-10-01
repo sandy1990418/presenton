@@ -1,7 +1,9 @@
 import asyncio
 import json
 import math
+import traceback
 import uuid
+import dirtyjson
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,7 +73,8 @@ async def stream_outlines(
             presentation.tone,
             presentation.verbosity,
             presentation.instructions,
-            True,
+            presentation.include_title_slide,
+            presentation.web_search,
         ):
             # Give control to the event loop
             await asyncio.sleep(0)
@@ -88,12 +91,18 @@ async def stream_outlines(
             presentation_outlines_text += chunk
 
         try:
-            presentation_outlines_json = json.loads(presentation_outlines_text)
-        except Exception:
-            raise HTTPException(
-                status_code=400,
-                detail="Failed to generate presentation outlines. Please try again.",
+            presentation_outlines_json = dict(
+                dirtyjson.loads(presentation_outlines_text)
             )
+        except Exception as e:
+            traceback.print_exc()
+            # Log the problematic text for debugging
+            logger.error(f"Failed to parse JSON. Text length: {len(presentation_outlines_text)}")
+            logger.error(f"Last 500 chars: {presentation_outlines_text[-500:]}")
+            yield SSEErrorResponse(
+                detail=f"Failed to generate presentation outlines. The response was incomplete or malformed. Please try again. {str(e)}",
+            ).to_string()
+            return
 
         presentation_outlines = PresentationOutlineModel(**presentation_outlines_json)
 

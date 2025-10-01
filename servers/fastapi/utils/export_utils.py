@@ -47,10 +47,12 @@ async def export_presentation(
         )
         pptx_creator.save(pptx_path)
 
-        # Return the file path for direct download
+        # Return web-accessible URL instead of file path
+        filename = os.path.basename(pptx_path)
+        web_path = f"/database/exports/{filename}"
         return PresentationAndPath(
             presentation_id=presentation_id,
-            path=pptx_path,
+            path=web_path,
         )
     else:
         sanitized_title = sanitize_filename(title or str(uuid.uuid4())).replace(' ', '_')
@@ -62,7 +64,7 @@ async def export_presentation(
             async with session.post(
                 "http://localhost:3000/api/export-as-pdf",
                 json={
-                    "id": presentation_id,
+                    "id": str(presentation_id),
                     "title": sanitize_filename(title or str(uuid.uuid4())),
                 },
             ) as response:

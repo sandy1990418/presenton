@@ -9,8 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slide } from "../types/slide";
-import { useGroupLayouts } from "../hooks/useGroupLayouts";
-import CitationFooter from "../presentation/components/CitationFooter";
+import { useTemplateLayouts } from "../hooks/useTemplateLayouts";
 
 
 interface PresentationModeProps {
@@ -33,7 +32,7 @@ const PresentationMode: React.FC<PresentationModeProps> = ({
   onSlideChange,
 
 }) => {
-  const { renderSlideContent } = useGroupLayouts();
+  const { renderSlideContent } = useTemplateLayouts();
   // Modify the handleKeyPress to prevent default behavior
   const handleKeyPress = useCallback(
     (event: KeyboardEvent) => {
@@ -196,12 +195,12 @@ const PresentationMode: React.FC<PresentationModeProps> = ({
         </div>
       </div>
       
-      {/* Citation Footer for fullscreen mode */}
+      {/* Citation Footer for fullscreen mode
       <CitationFooter 
         presentationId={presentationId} 
         className="fixed bottom-0 left-0 right-0 z-30"
         theme="dark"
-      />
+      /> */}
     </div>
   );
 };

@@ -16,7 +16,7 @@ import { useDispatch } from "react-redux";
 import { clearOutlines, setPresentationId } from "@/store/slices/presentationGeneration";
 import { ConfigurationSelects } from "./ConfigurationSelects";
 import { PromptInput } from "./PromptInput";
-import { LanguageType, PresentationConfig } from "../type";
+import {  LanguageType, PresentationConfig, ToneType, VerbosityType } from "../type";
 import SupportingDoc from "./SupportingDoc";
 import { Button } from "@/components/ui/button";
 import { ChevronRight } from "lucide-react";
@@ -48,6 +48,12 @@ const UploadPage = () => {
     slides: "8",
     language: LanguageType.English,
     prompt: "",
+    tone: ToneType.Default,
+    verbosity: VerbosityType.Standard,
+    instructions: "",
+    includeTableOfContents: false,
+    includeTitleSlide: false,
+    webSearch: false,
   });
   const [webSearchEnabled, setWebSearchEnabled] = useState<boolean>(false);
 
@@ -159,8 +165,14 @@ const UploadPage = () => {
       n_slides: config?.slides ? parseInt(config.slides) : null,
       file_paths: [],
       language: config?.language ?? "",
-      web_search_enabled: webSearchEnabled,
+      tone: config?.tone,
+      verbosity: config?.verbosity,
+      instructions: config?.instructions || null,
+      include_table_of_contents: !!config?.includeTableOfContents,
+      include_title_slide: !!config?.includeTitleSlide,
+      web_search: !!config?.webSearch,
     });
+
 
     dispatch(setPresentationId(createResponse.id));
     dispatch(clearOutlines())

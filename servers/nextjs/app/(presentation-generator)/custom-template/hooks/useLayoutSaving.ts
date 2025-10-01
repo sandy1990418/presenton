@@ -95,7 +95,6 @@ export const useLayoutSaving = (
       const uploadedFontUrls = UploadedFonts.map((font) => font.fontUrl);
       const googleFontCssUrls = fontsData?.internally_supported_fonts?.map(f => f.google_fonts_url).filter(Boolean) || [];
       const FontUrls = Array.from(new Set([...(uploadedFontUrls || []), ...googleFontCssUrls]));
-      console.log("FontUrls", FontUrls);
 
       for (let i = 0; i < slides.length; i++) {
         const slide = slides[i];
@@ -135,7 +134,6 @@ export const useLayoutSaving = (
         toast.error("No slides were successfully converted");
         return null;
       }
-      console.log(reactComponents);
 
       // First create/update the template metadata
       await fetch("/api/v1/ppt/template-management/templates", {

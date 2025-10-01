@@ -64,6 +64,13 @@ export function sanitizeFilename(input: string | null | undefined, replacement =
   // Remove any null bytes first
   sanitized = sanitized.replace(/\0/g, '');
   
+  // Remove newlines and other whitespace characters
+  sanitized = sanitized.replace(/[\r\n\t]/g, ' ');
+  // Replace multiple consecutive spaces with single space
+  sanitized = sanitized.replace(/\s+/g, ' ');
+  // Trim leading and trailing spaces
+  sanitized = sanitized.trim();
+  
   // Remove or replace path traversal sequences
   sanitized = sanitized.replace(/\.\./g, replacement);
   

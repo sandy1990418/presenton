@@ -16,7 +16,7 @@ import {
   deletePresentationSlide,
   updateSlide,
 } from "@/store/slices/presentationGeneration";
-import { useGroupLayouts } from "../../hooks/useGroupLayouts";
+import { useTemplateLayouts } from "../../hooks/useTemplateLayouts";
 import { usePathname } from "next/navigation";
 import { trackEvent, MixpanelEvent } from "@/utils/mixpanel";
 import NewSlide from "../../components/NewSlide";
@@ -37,7 +37,7 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
   );
 
   // Use the centralized group layouts hook
-  const { renderSlideContent, loading } = useGroupLayouts();
+  const { renderSlideContent, loading } = useTemplateLayouts();
   const pathname = usePathname();
 
   const handleSubmit = async () => {
@@ -75,12 +75,12 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
     try {
       trackEvent(MixpanelEvent.Slide_Delete_API_Call);
       // Add current state to past
-       dispatch(addToHistory({
+      dispatch(addToHistory({
         slides: presentationData?.slides,
         actionType: "DELETE_SLIDE"
       }));
       dispatch(deletePresentationSlide(slide.index));
-     
+
     } catch (error: any) {
       console.error("Error deleting slide:", error);
       toast.error("Error deleting slide.", {
@@ -176,12 +176,12 @@ const SlideContent = ({ slide, index, presentationId }: SlideContentProps) => {
           {showNewSlideSelection && !loading && (
             <NewSlide
               index={index}
-              group={slide.layout_group}
+              templateID={`${slide.layout.split(":")[0]}`}
               setShowNewSlideSelection={setShowNewSlideSelection}
               presentationId={presentationId}
             />
           )}
-         
+
           {!isStreaming && !loading && (
             <ToolTip content="Delete slide">
               <div

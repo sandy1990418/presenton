@@ -1,35 +1,76 @@
 /* This script starts the FastAPI and Next.js servers, setting up user configuration if necessary. It reads environment variables to configure API keys and other settings, ensuring that the user configuration file is created if it doesn't exist. The script also handles the starting of both servers and keeps the Node.js process alive until one of the servers exits. */
 
-const path = require('path');
-const { spawn } = require('child_process');
-const fs = require('fs');
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { spawn } from "child_process";
+import {
+  existsSync,
+  mkdirSync,
+  rmSync,
+  cpSync,
+  readFileSync,
+  writeFileSync,
+} from "fs";
 
-const fastapiDir = path.join(__dirname, 'servers/fastapi');
-const nextjsDir = path.join(__dirname, 'servers/nextjs');
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-const isDev = process.env.NODE_ENV === 'development';
-const canChangeKeys = process.env.CAN_CHANGE_KEYS !== 'false';
+const fastapiDir = join(__dirname, "servers/fastapi");
+const nextjsDir = join(__dirname, "servers/nextjs");
+
+const args = process.argv.slice(2);
+const hasDevArg = args.includes("--dev") || args.includes("-d");
+const isDev = hasDevArg;
+const canChangeKeys = process.env.CAN_CHANGE_KEYS !== "false";
 
 const fastapiPort = 8000;
 const nextjsPort = 3000;
 const appmcpPort = 8001;
 
-
-const userConfigPath = path.join(process.env.APP_DATA_DIRECTORY || path.join(__dirname, 'user_data'), 'userConfig.json');
-const userDataDir = path.dirname(userConfigPath);
+const userConfigPath = join(process.env.APP_DATA_DIRECTORY, "userConfig.json");
+const userDataDir = dirname(userConfigPath);
 
 // Create user_data directory if it doesn't exist
-if (!fs.existsSync(userDataDir)) {
-  fs.mkdirSync(userDataDir, { recursive: true });
+if (!existsSync(userDataDir)) {
+  mkdirSync(userDataDir, { recursive: true });
 }
+
+// Setup node_modules for development
+const setupNodeModules = () => {
+  return new Promise((resolve, reject) => {
+    console.log("Setting up node_modules for Next.js...");
+    const npmProcess = spawn("npm", ["install"], {
+      cwd: nextjsDir,
+      stdio: "inherit",
+      env: process.env,
+    });
+
+    npmProcess.on("error", (err) => {
+      console.error("npm install failed:", err);
+      reject(err);
+    });
+
+    npmProcess.on("exit", (code) => {
+      if (code === 0) {
+        console.log("npm install completed successfully");
+        resolve();
+      } else {
+        console.error(`npm install failed with exit code: ${code}`);
+        reject(new Error(`npm install failed with exit code: ${code}`));
+      }
+    });
+  });
+};
 
 process.env.USER_CONFIG_PATH = userConfigPath;
 
 //? UserConfig is only setup if API Keys can be changed
 const setupUserConfigFromEnv = () => {
   let existingConfig = {};
-  if (fs.existsSync(userConfigPath)) {
-    existingConfig = JSON.parse(fs.readFileSync(userConfigPath, 'utf8'));
+
+  if (existsSync(userConfigPath)) {
+    existingConfig = JSON.parse(readFileSync(userConfigPath, "utf8"));
   }
 
   if (!["ollama", "openai", "google"].includes(existingConfig.LLM)) {
@@ -44,8 +85,10 @@ const setupUserConfigFromEnv = () => {
     GOOGLE_MODEL: process.env.GOOGLE_MODEL || existingConfig.GOOGLE_MODEL,
     OLLAMA_URL: process.env.OLLAMA_URL || existingConfig.OLLAMA_URL,
     OLLAMA_MODEL: process.env.OLLAMA_MODEL || existingConfig.OLLAMA_MODEL,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || existingConfig.ANTHROPIC_API_KEY,
-    ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL || existingConfig.ANTHROPIC_MODEL,
+    ANTHROPIC_API_KEY:
+      process.env.ANTHROPIC_API_KEY || existingConfig.ANTHROPIC_API_KEY,
+    ANTHROPIC_MODEL:
+      process.env.ANTHROPIC_MODEL || existingConfig.ANTHROPIC_MODEL,
     CUSTOM_LLM_URL: process.env.CUSTOM_LLM_URL || existingConfig.CUSTOM_LLM_URL,
     CUSTOM_LLM_API_KEY:
       process.env.CUSTOM_LLM_API_KEY || existingConfig.CUSTOM_LLM_API_KEY,
@@ -55,14 +98,16 @@ const setupUserConfigFromEnv = () => {
       process.env.PIXABAY_API_KEY || existingConfig.PIXABAY_API_KEY,
     IMAGE_PROVIDER: process.env.IMAGE_PROVIDER || existingConfig.IMAGE_PROVIDER,
     TOOL_CALLS: process.env.TOOL_CALLS || existingConfig.TOOL_CALLS,
-    DISABLE_THINKING: process.env.DISABLE_THINKING || existingConfig.DISABLE_THINKING,
-    EXTENDED_REASONING: process.env.EXTENDED_REASONING || existingConfig.EXTENDED_REASONING,
+    DISABLE_THINKING:
+      process.env.DISABLE_THINKING || existingConfig.DISABLE_THINKING,
+    EXTENDED_REASONING:
+      process.env.EXTENDED_REASONING || existingConfig.EXTENDED_REASONING,
     WEB_GROUNDING: process.env.WEB_GROUNDING || existingConfig.WEB_GROUNDING,
     USE_CUSTOM_URL: process.env.USE_CUSTOM_URL || existingConfig.USE_CUSTOM_URL,
   };
 
-  fs.writeFileSync(userConfigPath, JSON.stringify(userConfig));
-}
+  writeFileSync(userConfigPath, JSON.stringify(userConfig));
+};
 
 const startServers = async () => {
   const fastApiProcess = spawn(
@@ -72,7 +117,7 @@ const startServers = async () => {
       cwd: fastapiDir,
       stdio: "inherit",
       env: process.env,
-    },
+    }
   );
 
   fastApiProcess.on("error", (err) => {
@@ -81,22 +126,17 @@ const startServers = async () => {
 
   const appmcpProcess = spawn(
     "python",
-    [
-      "mcp_server.py",
-      "--port",
-      appmcpPort.toString(),
-    ],
+    ["mcp_server.py", "--port", appmcpPort.toString()],
     {
       cwd: fastapiDir,
       stdio: "ignore",
       env: process.env,
-    },
+    }
   );
 
   appmcpProcess.on("error", (err) => {
     console.error("App MCP process failed to start:", err);
   });
-
 
   const nextjsProcess = spawn(
     "npm",
@@ -105,7 +145,7 @@ const startServers = async () => {
       cwd: nextjsDir,
       stdio: "inherit",
       env: process.env,
-    },
+    }
   );
 
   nextjsProcess.on("error", (err) => {
@@ -123,7 +163,23 @@ const startServers = async () => {
   process.exit(exitCode);
 };
 
-if (canChangeKeys) {
-  setupUserConfigFromEnv();
-}
-startServers();
+// Start nginx service
+const startNginx = () => {
+  console.log("Skipping nginx startup");
+  return;
+};
+
+const main = async () => {
+  if (isDev) {
+    await setupNodeModules();
+  }
+
+  if (canChangeKeys) {
+    setupUserConfigFromEnv();
+  }
+
+  startServers();
+  startNginx();
+};
+
+main();

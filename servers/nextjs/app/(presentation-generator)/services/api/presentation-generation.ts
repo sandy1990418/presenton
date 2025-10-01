@@ -49,18 +49,29 @@ export class PresentationGenerationApi {
     }
   }
  
-    static async createPresentation({
+   static async createPresentation({
     content,
     n_slides,
     file_paths,
     language,
-    web_search_enabled,
+    tone,
+    verbosity,
+    instructions,
+    include_table_of_contents,
+    include_title_slide,
+    web_search,
+    
   }: {
     content: string;
     n_slides: number | null;
     file_paths?: string[];
     language: string | null;
-    web_search_enabled?: boolean;
+    tone?: string | null;
+    verbosity?: string | null;
+    instructions?: string | null;
+    include_table_of_contents?: boolean;
+    include_title_slide?: boolean;
+    web_search?: boolean;
   }) {
     try {
       const controller = new AbortController();
@@ -76,7 +87,12 @@ export class PresentationGenerationApi {
             n_slides,
             file_paths,
             language,
-            web_search_enabled: web_search_enabled || false,
+            tone,
+            verbosity,
+            instructions,
+            include_table_of_contents,
+            include_title_slide,
+            web_search,
           }),
           cache: "no-cache",
           signal: controller.signal,
