@@ -50,44 +50,71 @@ async def process_slide_and_fetch_assets(
     slide: SlideModel,
 ) -> List[ImageAsset]:
 
-    async_tasks = []
-
     image_paths = get_dict_paths_with_key(slide.content, "__image_prompt__")
     icon_paths = get_dict_paths_with_key(slide.content, "__icon_query__")
 
+    # Create tasks for image generation
+    image_tasks = []
     for image_path in image_paths:
         __image_prompt__parent = get_dict_at_path(slide.content, image_path)
-        async_tasks.append(
+        task = asyncio.create_task(
             image_generation_service.generate_image(
                 ImagePrompt(
                     prompt=__image_prompt__parent["__image_prompt__"],
                 )
             )
         )
+        image_tasks.append(task)
 
+    # Create tasks for icon search
+    icon_tasks = []
     for icon_path in icon_paths:
         __icon_query__parent = get_dict_at_path(slide.content, icon_path)
-        async_tasks.append(
+        task = asyncio.create_task(
             ICON_FINDER_SERVICE.search_icons(__icon_query__parent["__icon_query__"])
         )
+        icon_tasks.append(task)
 
-    results = await asyncio.gather(*async_tasks)
-    results.reverse()
+    all_tasks = image_tasks + icon_tasks
 
+    # Wait for all tasks with timeout
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*all_tasks, return_exceptions=True),
+            timeout=60  # 1 minute timeout
+        )
+    except asyncio.TimeoutError:
+        print("Timeout: Asset generation took too long, using placeholders")
+        # Create fallback results without manually cancelling tasks
+        results = ["/static/images/placeholder.jpg"] * len(image_tasks) + [["placeholder-icon"]] * len(icon_tasks)
+    # Process image results
     return_assets = []
-    for image_path in image_paths:
+    for i, image_path in enumerate(image_paths):
         image_dict = get_dict_at_path(slide.content, image_path)
-        result = results.pop()
-        if isinstance(result, ImageAsset):
+        result = results[i]
+        
+        if isinstance(result, Exception):
+            print(f"Image generation failed: {result}")
+            image_dict["__image_url__"] = convert_file_path_to_web_url("/static/images/placeholder.jpg")
+        elif isinstance(result, ImageAsset):
             return_assets.append(result)
             image_dict["__image_url__"] = convert_file_path_to_web_url(result.path)
         else:
             image_dict["__image_url__"] = convert_file_path_to_web_url(result)
         set_dict_at_path(slide.content, image_path, image_dict)
 
-    for icon_path in icon_paths:
+    # Process icon results
+    for i, icon_path in enumerate(icon_paths):
         icon_dict = get_dict_at_path(slide.content, icon_path)
-        icon_dict["__icon_url__"] = results.pop()[0]
+        result = results[len(image_paths) + i]
+        
+        if isinstance(result, Exception):
+            print(f"Icon search failed: {result}")
+            icon_dict["__icon_url__"] = "/static/icons/placeholder.png"
+        elif result and len(result) > 0:
+            icon_dict["__icon_url__"] = result[0]
+        else:
+            icon_dict["__icon_url__"] = "/static/icons/placeholder.png"
         set_dict_at_path(slide.content, icon_path, icon_dict)
 
     return return_assets
@@ -176,8 +203,24 @@ async def process_old_and_new_slides_and_fetch_assets(
         )
         new_icons_fetch_status.append(True)
 
-    new_images = await asyncio.gather(*async_image_fetch_tasks)
-    new_icons = await asyncio.gather(*async_icon_fetch_tasks)
+    # Handle async tasks with timeout
+    try:
+        new_images = await asyncio.wait_for(
+            asyncio.gather(*async_image_fetch_tasks, return_exceptions=True),
+            timeout=60
+        ) if async_image_fetch_tasks else []
+    except asyncio.TimeoutError:
+        print("Timeout: Image generation took too long, using placeholders")
+        new_images = ["/static/images/placeholder.jpg"] * len(async_image_fetch_tasks)
+    
+    try:
+        new_icons = await asyncio.wait_for(
+            asyncio.gather(*async_icon_fetch_tasks, return_exceptions=True),
+            timeout=60
+        ) if async_icon_fetch_tasks else []
+    except asyncio.TimeoutError:
+        print("Timeout: Icon search took too long, using placeholders")
+        new_icons = [["placeholder-icon"]] * len(async_icon_fetch_tasks)
 
     # list of new assets
     new_assets = []
@@ -186,7 +229,10 @@ async def process_old_and_new_slides_and_fetch_assets(
     for i, new_image in enumerate(new_images):
         if new_images_fetch_status[i]:
             fetched_image = new_images[i]
-            if isinstance(fetched_image, ImageAsset):
+            if isinstance(fetched_image, Exception):
+                print(f"Image generation failed: {fetched_image}")
+                image_url = convert_file_path_to_web_url("/static/images/placeholder.jpg")
+            elif isinstance(fetched_image, ImageAsset):
                 new_assets.append(fetched_image)
                 image_url = convert_file_path_to_web_url(fetched_image.path)
             else:
@@ -195,7 +241,13 @@ async def process_old_and_new_slides_and_fetch_assets(
 
     for i, new_icon in enumerate(new_icons):
         if new_icons_fetch_status[i]:
-            new_icon_dicts[i]["__icon_url__"] = new_icons[i][0]
+            if isinstance(new_icons[i], Exception):
+                print(f"Icon search failed: {new_icons[i]}")
+                new_icon_dicts[i]["__icon_url__"] = "/static/icons/placeholder.png"
+            elif new_icons[i] and len(new_icons[i]) > 0:
+                new_icon_dicts[i]["__icon_url__"] = new_icons[i][0]
+            else:
+                new_icon_dicts[i]["__icon_url__"] = "/static/icons/placeholder.png"
 
     for i, new_image_dict in enumerate(new_image_dicts):
         set_dict_at_path(new_slide_content, new_image_dict_paths[i], new_image_dict)
