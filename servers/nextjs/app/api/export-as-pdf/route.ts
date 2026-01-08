@@ -85,8 +85,15 @@ export async function POST(req: NextRequest) {
     await browser.close();
 
   const sanitizedTitle = sanitizeFilename(title ?? "presentation");
+  const appDataDirectory = process.env.APP_DATA_DIRECTORY!;
+  if (!appDataDirectory) {
+    return NextResponse.json({
+      error: "App data directory not found",
+      status: 500,
+    });
+  }
   const destinationPath = path.join(
-    process.env.APP_DATA_DIRECTORY!,
+    appDataDirectory,
     "exports",
     `${sanitizedTitle}.pdf`
   );

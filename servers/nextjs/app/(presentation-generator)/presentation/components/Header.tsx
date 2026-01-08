@@ -4,9 +4,9 @@ import {
   SquareArrowOutUpRight,
   Play,
   Loader2,
-  Redo2 ,
+  Redo2,
   Undo2,
-  RefreshCcw,
+
 } from "lucide-react";
 import React, { useState } from "react";
 import Wrapper from "@/components/Wrapper";
@@ -61,40 +61,25 @@ const Header = ({
 
   const handleExportPptx = async () => {
     if (isStreaming) return;
-    
+
     console.log('PPTX Export started...');
 
     try {
       setOpen(false);
       setShowLoader(true);
-      
-      console.log('Exporting presentation using existing export endpoint...');
-      // Use the existing export endpoint that handles real presentation data
-      const response = await fetch(`http://localhost:8000/api/v1/ppt/presentation/export`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          id: presentation_id,
-          export_as: "pptx"
-        })
-      });
-
-      console.log('Response received:', response.status);
-
-      if (response.ok) {
-        console.log('Getting export result...');
-        const result = await response.json();
-        console.log('Export result:', result);
-        
-        // The result contains the file path, convert to download URL
-        const filename = result.path.split('/').pop();
-        const downloadUrl = `http://localhost:8000/exports/${filename}`;
-        
-        console.log('Downloading from:', downloadUrl);
-        window.open(downloadUrl, '_blank');
-        console.log('Download completed successfully!');
+      // Save the presentation data before exporting
+      trackEvent(MixpanelEvent.Header_UpdatePresentationContent_API_Call);
+      await PresentationGenerationApi.updatePresentationContent(presentationData);
+      trackEvent(MixpanelEvent.Header_GetPptxModel_API_Call);
+      const pptx_model = await get_presentation_pptx_model(presentation_id);
+      if (!pptx_model) {
+        throw new Error("Failed to get presentation PPTX model");
+      }
+      trackEvent(MixpanelEvent.Header_ExportAsPPTX_API_Call);
+      const pptx_path = await PresentationGenerationApi.exportAsPPTX(pptx_model);
+      if (pptx_path) {
+        // window.open(pptx_path, '_self');
+        downloadLink(pptx_path);
       } else {
         const errorText = await response.text();
         console.error('Server error:', errorText);
@@ -109,7 +94,7 @@ const Header = ({
     } finally {
       setShowLoader(false);
     }
-    
+
     // Explicitly prevent any further processing
     return false;
   };
@@ -190,28 +175,28 @@ const Header = ({
     <div className="flex flex-col lg:flex-row items-center gap-4">
       {/* undo redo */}
       <button onClick={handleReGenerate} disabled={isStreaming || !presentationData} className="text-white  disabled:opacity-50" >
-      
+
         Re-Generate
       </button>
       <div className="flex items-center gap-2 ">
         <ToolTip content="Undo">
-        <button disabled={!canUndo} className="text-white disabled:opacity-50" onClick={() => {
-          onUndo();
-        }}>
+          <button disabled={!canUndo} className="text-white disabled:opacity-50" onClick={() => {
+            onUndo();
+          }}>
 
-          <Undo2 className="w-6 h-6 " />
-          
-        </button>
-          </ToolTip>
-          <ToolTip content="Redo">
+            <Undo2 className="w-6 h-6 " />
 
-        <button disabled={!canRedo} className="text-white disabled:opacity-50" onClick={() => {
-          onRedo();
-        }}>
-          <Redo2 className="w-6 h-6 " />
-         
-        </button>
-          </ToolTip>
+          </button>
+        </ToolTip>
+        <ToolTip content="Redo">
+
+          <button disabled={!canRedo} className="text-white disabled:opacity-50" onClick={() => {
+            onRedo();
+          }}>
+            <Redo2 className="w-6 h-6 " />
+
+          </button>
+        </ToolTip>
 
       </div>
 

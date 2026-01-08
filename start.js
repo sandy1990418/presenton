@@ -3,14 +3,7 @@
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
-import {
-  existsSync,
-  mkdirSync,
-  rmSync,
-  cpSync,
-  readFileSync,
-  writeFileSync,
-} from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -104,6 +97,13 @@ const setupUserConfigFromEnv = () => {
       process.env.EXTENDED_REASONING || existingConfig.EXTENDED_REASONING,
     WEB_GROUNDING: process.env.WEB_GROUNDING || existingConfig.WEB_GROUNDING,
     USE_CUSTOM_URL: process.env.USE_CUSTOM_URL || existingConfig.USE_CUSTOM_URL,
+    COMFYUI_URL: process.env.COMFYUI_URL || existingConfig.COMFYUI_URL,
+    COMFYUI_WORKFLOW:
+      process.env.COMFYUI_WORKFLOW || existingConfig.COMFYUI_WORKFLOW,
+    DALL_E_3_QUALITY:
+      process.env.DALL_E_3_QUALITY || existingConfig.DALL_E_3_QUALITY,
+    GPT_IMAGE_1_5_QUALITY:
+      process.env.GPT_IMAGE_1_5_QUALITY || existingConfig.GPT_IMAGE_1_5_QUALITY,
   };
 
   writeFileSync(userConfigPath, JSON.stringify(userConfig));
@@ -112,7 +112,13 @@ const setupUserConfigFromEnv = () => {
 const startServers = async () => {
   const fastApiProcess = spawn(
     "python",
-    ["server.py", "--port", fastapiPort.toString(), "--reload", isDev],
+    [
+      "server.py",
+      "--port",
+      fastapiPort.toString(),
+      "--reload",
+      isDev ? "true" : "false",
+    ],
     {
       cwd: fastapiDir,
       stdio: "inherit",
@@ -140,7 +146,15 @@ const startServers = async () => {
 
   const nextjsProcess = spawn(
     "npm",
-    ["run", isDev ? "dev" : "start", "--", "-p", nextjsPort.toString()],
+    [
+      "run",
+      isDev ? "dev" : "start",
+      "--",
+      "-H",
+      "127.0.0.1",
+      "-p",
+      nextjsPort.toString(),
+    ],
     {
       cwd: nextjsDir,
       stdio: "inherit",

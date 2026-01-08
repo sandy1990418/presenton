@@ -106,15 +106,12 @@ async def process_slide_and_fetch_assets(
     # Process icon results
     for i, icon_path in enumerate(icon_paths):
         icon_dict = get_dict_at_path(slide.content, icon_path)
-        result = results[len(image_paths) + i]
-        
-        if isinstance(result, Exception):
-            print(f"Icon search failed: {result}")
-            icon_dict["__icon_url__"] = "/static/icons/placeholder.png"
-        elif result and len(result) > 0:
-            icon_dict["__icon_url__"] = result[0]
+        icon_result = results.pop()
+        if icon_result and len(icon_result) > 0:
+            icon_dict["__icon_url__"] = icon_result[0]
         else:
-            icon_dict["__icon_url__"] = "/static/icons/placeholder.png"
+            # Fallback to placeholder if no icon found
+            icon_dict["__icon_url__"] = "/static/icons/placeholder.svg"
         set_dict_at_path(slide.content, icon_path, icon_dict)
 
     return return_assets
@@ -241,13 +238,12 @@ async def process_old_and_new_slides_and_fetch_assets(
 
     for i, new_icon in enumerate(new_icons):
         if new_icons_fetch_status[i]:
-            if isinstance(new_icons[i], Exception):
-                print(f"Icon search failed: {new_icons[i]}")
-                new_icon_dicts[i]["__icon_url__"] = "/static/icons/placeholder.png"
-            elif new_icons[i] and len(new_icons[i]) > 0:
-                new_icon_dicts[i]["__icon_url__"] = new_icons[i][0]
+            icon_result = new_icons[i]
+            if icon_result and len(icon_result) > 0:
+                new_icon_dicts[i]["__icon_url__"] = icon_result[0]
             else:
-                new_icon_dicts[i]["__icon_url__"] = "/static/icons/placeholder.png"
+                # Fallback to placeholder if no icon found
+                new_icon_dicts[i]["__icon_url__"] = "/static/icons/placeholder.svg"
 
     for i, new_image_dict in enumerate(new_image_dicts):
         set_dict_at_path(new_slide_content, new_image_dict_paths[i], new_image_dict)
