@@ -283,6 +283,33 @@ async def stream_presentation(
 
     image_generation_service = ImageGenerationService(get_images_directory())
 
+    # Semaphore to limit concurrent LLM requests (avoid rate limiting)
+    semaphore = asyncio.Semaphore(5)
+    # Timeout for each LLM request (in seconds)
+    LLM_REQUEST_TIMEOUT = 60
+
+    async def generate_slide_content_with_semaphore(
+        semaphore: asyncio.Semaphore,
+        slide_layout,
+        slide_outline,
+        language,
+        tone,
+        verbosity,
+        instructions,
+    ):
+        async with semaphore:
+            return await asyncio.wait_for(
+                get_slide_content_from_type_and_outline(
+                    slide_layout,
+                    slide_outline,
+                    language,
+                    tone,
+                    verbosity,
+                    instructions,
+                ),
+                timeout=LLM_REQUEST_TIMEOUT,
+            )
+
     async def inner():
         structure = presentation.get_structure()
         layout = presentation.get_layout()
@@ -296,11 +323,17 @@ async def stream_presentation(
             event="response",
             data=json.dumps({"type": "chunk", "chunk": '{ "slides": [ '}),
         ).to_string()
+
+        # Prepare all slide content generation tasks for concurrent execution
+        slide_content_tasks = []
+        slide_layouts_info = []  # Store (index, slide_layout) for each task
+        
         for i, slide_layout_index in enumerate(structure.slides):
             slide_layout = layout.slides[slide_layout_index]
-
-            try:
-                slide_content = await get_slide_content_from_type_and_outline(
+            slide_layouts_info.append((i, slide_layout))
+            slide_content_tasks.append(
+                generate_slide_content_with_semaphore(
+                    semaphore,
                     slide_layout,
                     outline.slides[i],
                     presentation.language,
@@ -308,10 +341,26 @@ async def stream_presentation(
                     presentation.verbosity,
                     presentation.instructions,
                 )
-            except HTTPException as e:
-                yield SSEErrorResponse(detail=e.detail).to_string()
+            )
+
+        # Execute all slide content generation concurrently (limited by semaphore)
+        # return_exceptions=True prevents one failure from cancelling all tasks
+        slide_contents = await asyncio.gather(*slide_content_tasks, return_exceptions=True)
+
+        # Check for any errors in the results
+        for i, result in enumerate(slide_contents):
+            if isinstance(result, asyncio.TimeoutError):
+                yield SSEErrorResponse(detail=f"Slide {i + 1} generation timed out").to_string()
+                return
+            elif isinstance(result, HTTPException):
+                yield SSEErrorResponse(detail=result.detail).to_string()
+                return
+            elif isinstance(result, Exception):
+                yield SSEErrorResponse(detail=f"Slide {i + 1} generation failed: {str(result)}").to_string()
                 return
 
+        # Process results and build slides
+        for (i, slide_layout), slide_content in zip(slide_layouts_info, slide_contents):
             slide = SlideModel(
                 presentation=id,
                 layout_group=layout.name,
@@ -697,20 +746,24 @@ async def generate_presentation_handler(
 
         # Schedule slide content generation and asset fetching in batches of 10
         batch_size = 10
+        LLM_REQUEST_TIMEOUT = 120  # 2 minutes per slide
         for start in range(0, len(slide_layouts), batch_size):
             end = min(start + batch_size, len(slide_layouts))
 
             print(f"Generating slides from {start} to {end}")
 
-            # Generate contents for this batch concurrently
+            # Generate contents for this batch concurrently with timeout
             content_tasks = [
-                get_slide_content_from_type_and_outline(
-                    slide_layouts[i],
-                    presentation_outlines.slides[i],
-                    request.language,
-                    request.tone.value,
-                    request.verbosity.value,
-                    request.instructions,
+                asyncio.wait_for(
+                    get_slide_content_from_type_and_outline(
+                        slide_layouts[i],
+                        presentation_outlines.slides[i],
+                        request.language,
+                        request.tone.value,
+                        request.verbosity.value,
+                        request.instructions,
+                    ),
+                    timeout=LLM_REQUEST_TIMEOUT,
                 )
                 for i in range(start, end)
             ]
