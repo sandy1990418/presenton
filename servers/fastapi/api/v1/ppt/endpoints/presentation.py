@@ -42,7 +42,7 @@ from utils.llm_calls.generate_presentation_outlines import generate_ppt_outline
 from models.sql.slide import SlideModel
 from models.sse_response import SSECompleteResponse, SSEErrorResponse, SSEResponse
 
-from services.database import get_async_session
+from services.database import async_session_maker, get_async_session
 from services.temp_file_service import TEMP_FILE_SERVICE
 from services.concurrent_service import CONCURRENT_SERVICE
 from models.sql.presentation import PresentationModel
@@ -394,16 +394,19 @@ async def stream_presentation(
         for assets_list in generated_assets_lists:
             generated_assets.extend(assets_list)
 
-        # Moved this here to make sure new slides are generated before deleting the old ones
-        await sql_session.execute(
-            delete(SlideModel).where(SlideModel.presentation == id)
-        )
-        await sql_session.commit()
+        # Use a new session for DB operations to avoid session timeout
+        # The original sql_session may be terminated during long image generation
+        async with async_session_maker() as db_session:
+            # Moved this here to make sure new slides are generated before deleting the old ones
+            await db_session.execute(
+                delete(SlideModel).where(SlideModel.presentation == id)
+            )
+            await db_session.commit()
 
-        sql_session.add(presentation)
-        sql_session.add_all(slides)
-        sql_session.add_all(generated_assets)
-        await sql_session.commit()
+            db_session.add(presentation)
+            db_session.add_all(slides)
+            db_session.add_all(generated_assets)
+            await db_session.commit()
 
         presentation_data = presentation.model_dump()
         presentation_data["id"] = str(presentation_data["id"])
