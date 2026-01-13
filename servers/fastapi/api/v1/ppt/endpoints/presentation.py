@@ -1,4 +1,6 @@
 import asyncio
+import contextlib
+import anyio
 from datetime import datetime
 import json
 import math
@@ -7,7 +9,7 @@ import random
 import traceback
 from typing import Annotated, List, Literal, Optional, Tuple
 import dirtyjson
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -264,22 +266,25 @@ async def prepare_presentation(
 
 
 @PRESENTATION_ROUTER.get("/stream/{id}", response_model=PresentationWithSlides)
-async def stream_presentation(
-    id: uuid.UUID, sql_session: AsyncSession = Depends(get_async_session)
-):
-    presentation = await sql_session.get(PresentationModel, id)
-    if not presentation:
-        raise HTTPException(status_code=404, detail="Presentation not found")
-    if not presentation.structure:
-        raise HTTPException(
-            status_code=400,
-            detail="Presentation not prepared for stream",
-        )
-    if not presentation.outlines:
-        raise HTTPException(
-            status_code=400,
-            detail="Outlines can not be empty",
-        )
+async def stream_presentation(id: uuid.UUID, request: Request):
+    # Use our own session management instead of Depends(get_async_session)
+    # to avoid session being closed during long-running SSE stream
+    async with async_session_maker() as init_session:
+        presentation = await init_session.get(PresentationModel, id)
+        if not presentation:
+            raise HTTPException(status_code=404, detail="Presentation not found")
+        if not presentation.structure:
+            raise HTTPException(
+                status_code=400,
+                detail="Presentation not prepared for stream",
+            )
+        if not presentation.outlines:
+            raise HTTPException(
+                status_code=400,
+                detail="Outlines can not be empty",
+            )
+        # Detach presentation from session so we can use it after session closes
+        init_session.expunge(presentation)
 
     image_generation_service = ImageGenerationService(get_images_directory())
 
@@ -298,129 +303,194 @@ async def stream_presentation(
         instructions,
     ):
         async with semaphore:
-            return await asyncio.wait_for(
-                get_slide_content_from_type_and_outline(
+            return await get_slide_content_from_type_and_outline(
                     slide_layout,
                     slide_outline,
                     language,
                     tone,
                     verbosity,
                     instructions,
-                ),
-                timeout=LLM_REQUEST_TIMEOUT,
-            )
+                )
+
+    KEEPALIVE_INTERVAL = 10
 
     async def inner():
-        structure = presentation.get_structure()
-        layout = presentation.get_layout()
-        outline = presentation.get_presentation_outline()
+        try:
+            print("[STREAM] inner() started")
+            structure = presentation.get_structure()
+            layout = presentation.get_layout()
+            outline = presentation.get_presentation_outline()
 
-        # These tasks will be gathered and awaited after all slides are generated
-        async_assets_generation_tasks = []
+            # These tasks will be gathered and awaited after all slides are generated
+            async_assets_generation_tasks = []
 
-        slides: List[SlideModel] = []
-        yield SSEResponse(
-            event="response",
-            data=json.dumps({"type": "chunk", "chunk": '{ "slides": [ '}),
-        ).to_string()
+            slides: List[SlideModel] = []
+            yield SSEResponse(
+                event="response",
+                data=json.dumps({"type": "chunk", "chunk": '{ "slides": [ '}),
+            ).to_string()
 
-        # Prepare all slide content generation tasks for concurrent execution
-        slide_content_tasks = []
-        slide_layouts_info = []  # Store (index, slide_layout) for each task
-        
-        for i, slide_layout_index in enumerate(structure.slides):
-            slide_layout = layout.slides[slide_layout_index]
-            slide_layouts_info.append((i, slide_layout))
-            slide_content_tasks.append(
-                generate_slide_content_with_semaphore(
-                    semaphore,
-                    slide_layout,
-                    outline.slides[i],
-                    presentation.language,
-                    presentation.tone,
-                    presentation.verbosity,
-                    presentation.instructions,
+            # Prepare all slide content generation tasks for concurrent execution
+            slide_content_tasks = []
+            slide_layouts_info = []  # Store (index, slide_layout) for each task
+
+            print(f"[STREAM] Preparing {len(structure.slides)} slide content tasks")
+            for i, slide_layout_index in enumerate(structure.slides):
+                slide_layout = layout.slides[slide_layout_index]
+                slide_layouts_info.append((i, slide_layout))
+                slide_content_tasks.append(
+                    generate_slide_content_with_semaphore(
+                        semaphore,
+                        slide_layout,
+                        outline.slides[i],
+                        presentation.language,
+                        presentation.tone,
+                        presentation.verbosity,
+                        presentation.instructions,
+                    )
                 )
+
+            async def run_slide_content_tasks():
+                return await asyncio.gather(
+                    *slide_content_tasks, return_exceptions=True
+                )
+
+            # Execute all slide content generation concurrently (limited by semaphore)
+            # return_exceptions=True prevents one failure from cancelling all tasks
+            print("[STREAM] Starting slide content generation...")
+            slide_content_task = asyncio.create_task(run_slide_content_tasks())
+            while not slide_content_task.done():
+                if await request.is_disconnected():
+                    slide_content_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await slide_content_task
+                    print("[STREAM] Client disconnected during slide generation")
+                    return
+                yield ": keep-alive\n\n"
+                await asyncio.sleep(KEEPALIVE_INTERVAL)
+            slide_contents = await slide_content_task
+            print(
+                f"[STREAM] Slide content generation done, got {len(slide_contents)} results"
             )
 
-        # Execute all slide content generation concurrently (limited by semaphore)
-        # return_exceptions=True prevents one failure from cancelling all tasks
-        slide_contents = await asyncio.gather(*slide_content_tasks, return_exceptions=True)
+            # Check for any errors in the results
+            for i, result in enumerate(slide_contents):
+                if isinstance(result, asyncio.TimeoutError):
+                    yield SSEErrorResponse(
+                        detail=f"Slide {i + 1} generation timed out"
+                    ).to_string()
+                    return
+                elif isinstance(result, HTTPException):
+                    yield SSEErrorResponse(detail=result.detail).to_string()
+                    return
+                elif isinstance(result, Exception):
+                    yield SSEErrorResponse(
+                        detail=f"Slide {i + 1} generation failed: {str(result)}"
+                    ).to_string()
+                    return
 
-        # Check for any errors in the results
-        for i, result in enumerate(slide_contents):
-            if isinstance(result, asyncio.TimeoutError):
-                yield SSEErrorResponse(detail=f"Slide {i + 1} generation timed out").to_string()
-                return
-            elif isinstance(result, HTTPException):
-                yield SSEErrorResponse(detail=result.detail).to_string()
-                return
-            elif isinstance(result, Exception):
-                yield SSEErrorResponse(detail=f"Slide {i + 1} generation failed: {str(result)}").to_string()
-                return
+            # Process results and build slides
+            for (i, slide_layout), slide_content in zip(
+                slide_layouts_info, slide_contents
+            ):
+                slide = SlideModel(
+                    presentation=id,
+                    layout_group=layout.name,
+                    layout=slide_layout.id,
+                    index=i,
+                    speaker_note=slide_content.get("__speaker_note__", ""),
+                    content=slide_content,
+                )
+                slides.append(slide)
 
-        # Process results and build slides
-        for (i, slide_layout), slide_content in zip(slide_layouts_info, slide_contents):
-            slide = SlideModel(
-                presentation=id,
-                layout_group=layout.name,
-                layout=slide_layout.id,
-                index=i,
-                speaker_note=slide_content.get("__speaker_note__", ""),
-                content=slide_content,
-            )
-            slides.append(slide)
+                # This will mutate slide and add placeholder assets
+                process_slide_add_placeholder_assets(slide)
 
-            # This will mutate slide and add placeholder assets
-            process_slide_add_placeholder_assets(slide)
+                # This will mutate slide
+                async_assets_generation_tasks.append(
+                    process_slide_and_fetch_assets(image_generation_service, slide)
+                )
 
-            # This will mutate slide
-            async_assets_generation_tasks.append(
-                process_slide_and_fetch_assets(image_generation_service, slide)
-            )
+                yield SSEResponse(
+                    event="response",
+                    data=json.dumps(
+                        {"type": "chunk", "chunk": slide.model_dump_json()}
+                    ),
+                ).to_string()
 
             yield SSEResponse(
                 event="response",
-                data=json.dumps({"type": "chunk", "chunk": slide.model_dump_json()}),
+                data=json.dumps({"type": "chunk", "chunk": " ] }"}),
             ).to_string()
 
-        yield SSEResponse(
-            event="response",
-            data=json.dumps({"type": "chunk", "chunk": " ] }"}),
-        ).to_string()
-
-        generated_assets_lists = await asyncio.gather(*async_assets_generation_tasks)
-        generated_assets = []
-        for assets_list in generated_assets_lists:
-            generated_assets.extend(assets_list)
-
-        # Use a new session for DB operations to avoid session timeout
-        # The original sql_session may be terminated during long image generation
-        async with async_session_maker() as db_session:
-            # Moved this here to make sure new slides are generated before deleting the old ones
-            await db_session.execute(
-                delete(SlideModel).where(SlideModel.presentation == id)
+            print(
+                f"[STREAM] Starting asset generation for {len(async_assets_generation_tasks)} tasks..."
             )
-            await db_session.commit()
+            if async_assets_generation_tasks:
+                async def run_assets_tasks():
+                    return await asyncio.gather(*async_assets_generation_tasks)
 
-            db_session.add(presentation)
-            db_session.add_all(slides)
-            db_session.add_all(generated_assets)
-            await db_session.commit()
+                assets_task = asyncio.create_task(run_assets_tasks())
+                while not assets_task.done():
+                    if await request.is_disconnected():
+                        assets_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await assets_task
+                        print("[STREAM] Client disconnected during asset generation")
+                        return
+                    yield ": keep-alive\n\n"
+                    await asyncio.sleep(KEEPALIVE_INTERVAL)
+                generated_assets_lists = await assets_task
+            else:
+                generated_assets_lists = []
+            print(f"[STREAM] Asset generation done")
+            generated_assets = []
+            for assets_list in generated_assets_lists:
+                generated_assets.extend(assets_list)
 
-        presentation_data = presentation.model_dump()
-        presentation_data["id"] = str(presentation_data["id"])
-        response = PresentationWithSlides(
-            **presentation_data,
-            slides=slides,
-        )
+            # Use a new session for DB operations to avoid session timeout
+            # The original sql_session may be terminated during long image generation
+            print("[STREAM] Starting DB save...")
+            db_session = async_session_maker()
+            try:
+                with anyio.CancelScope(shield=True):
+                    # Moved this here to make sure new slides are generated before deleting the old ones
+                    await db_session.execute(
+                        delete(SlideModel).where(SlideModel.presentation == id)
+                    )
+                    await db_session.commit()
 
-        yield SSECompleteResponse(
-            key="presentation",
-            value=response.model_dump(mode="json"),
-        ).to_string()
+                    db_session.add(presentation)
+                    db_session.add_all(slides)
+                    db_session.add_all(generated_assets)
+                    await db_session.commit()
+                    print("[STREAM] DB save done")
+            finally:
+                # Avoid anyio cancellation interrupting aiosqlite close
+                with anyio.CancelScope(shield=True):
+                    await db_session.close()
 
-    return StreamingResponse(inner(), media_type="text/event-stream")
+            presentation_data = presentation.model_dump()
+            presentation_data["id"] = str(presentation_data["id"])
+            response = PresentationWithSlides(
+                **presentation_data,
+                slides=slides,
+            )
+
+            yield SSECompleteResponse(
+                key="presentation",
+                value=response.model_dump(mode="json"),
+            ).to_string()
+        except asyncio.CancelledError:
+            print("[STREAM] Client disconnected, stopping stream")
+            return
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(inner(), media_type="text/event-stream", headers=headers)
 
 
 @PRESENTATION_ROUTER.patch("/update", response_model=PresentationWithSlides)

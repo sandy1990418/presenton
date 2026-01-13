@@ -25,7 +25,13 @@ from utils.get_env import get_app_data_directory_env
 
 database_url, connect_args = get_database_url_and_connect_args()
 
-sql_engine: AsyncEngine = create_async_engine(database_url, connect_args=connect_args)
+sql_engine: AsyncEngine = create_async_engine(
+    database_url,
+    connect_args=connect_args,
+    # Pool configuration to handle long-running operations (e.g., image generation)
+    pool_pre_ping=True,  # Check connection validity before use
+    pool_recycle=300,  # Recycle connections after 5 minutes
+)
 async_session_maker = async_sessionmaker(sql_engine, expire_on_commit=False)
 
 
@@ -40,7 +46,10 @@ container_db_path = os.path.join(
 )
 container_db_url = f"sqlite+aiosqlite:///{container_db_path}"
 container_db_engine: AsyncEngine = create_async_engine(
-    container_db_url, connect_args={"check_same_thread": False}
+    container_db_url,
+    connect_args={"check_same_thread": False},
+    pool_pre_ping=True,
+    pool_recycle=300,
 )
 container_db_async_session_maker = async_sessionmaker(
     container_db_engine, expire_on_commit=False
