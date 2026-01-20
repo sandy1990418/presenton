@@ -153,7 +153,7 @@ class LLMClient:
         return AsyncOpenAI(
             base_url=get_custom_llm_url_env(),
             api_key=get_custom_llm_api_key_env() or "null",
-            timeout=60.0,  # 60 second timeout for HTTP requests
+            timeout=600.0,  # 60 second timeout for HTTP requests
             max_retries=2,  # Retry up to 2 times on transient errors
         )
 
@@ -195,6 +195,48 @@ class LLMClient:
         return [
             message for message in messages if not isinstance(message, LLMSystemMessage)
         ]
+
+    def _build_json_schema_prompt(self, schema: dict) -> str:
+        """Build a prompt instruction for JSON schema output."""
+        schema_str = json.dumps(schema, indent=2)
+        return f"""You must respond with valid JSON that follows this exact schema:
+
+```json
+{schema_str}
+```
+
+IMPORTANT:
+- Output ONLY the JSON object, no markdown code blocks, no explanations
+- Ensure all required fields are present
+- Follow the exact types specified in the schema"""
+
+    def _inject_schema_into_messages(
+        self, messages: List[LLMMessage], schema_instruction: str
+    ) -> List[LLMMessage]:
+        """Inject JSON schema instruction into messages."""
+        new_messages = []
+        system_found = False
+
+        for message in messages:
+            if isinstance(message, LLMSystemMessage):
+                # Append schema instruction to system message
+                new_messages.append(
+                    LLMSystemMessage(
+                        role="system",
+                        content=f"{message.content}\n\n{schema_instruction}",
+                    )
+                )
+                system_found = True
+            else:
+                new_messages.append(message)
+
+        # If no system message, add one at the beginning
+        if not system_found:
+            new_messages.insert(
+                0, LLMSystemMessage(role="system", content=schema_instruction)
+            )
+
+        return new_messages
 
     # ? Generate Unstructured Content
     async def _generate_openai(
@@ -541,11 +583,19 @@ class LLMClient:
 
         # Determine the response format based on provider and settings
         response_format_param = None
+        actual_messages = messages
         if not use_tool_calls_for_structured_output:
-            # vLLM and other custom providers may not support json_schema, use json_object instead
+            # vLLM and other custom providers may not support response_format,
+            # use prompt-based JSON schema instead
             if self.llm_provider in (LLMProvider.CUSTOM, LLMProvider.OLLAMA):
-                response_format_param = {"type": "json_object"}
-                logger.debug(f"_generate_openai_structured: using json_object format for {self.llm_provider}")
+                response_format_param = None
+                schema_instruction = self._build_json_schema_prompt(response_schema)
+                actual_messages = self._inject_schema_into_messages(
+                    messages, schema_instruction
+                )
+                logger.debug(
+                    f"_generate_openai_structured: using prompt-based JSON schema for {self.llm_provider}"
+                )
             else:
                 response_format_param = {
                     "type": "json_schema",
@@ -556,70 +606,46 @@ class LLMClient:
                     },
                 }
 
-        @retry(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type((APITimeoutError, APIConnectionError, APIError)),
-            reraise=True,
-        )
-        async def _call_api():
-            return await client.chat.completions.create(
+        # Build API call kwargs, only include response_format if not None
+        api_kwargs = {
+            "model": model,
+            "messages": [message.model_dump() for message in actual_messages],
+            "max_completion_tokens": max_tokens,
+            "tools": all_tools,
+            "extra_body": extra_body,
+            "reasoning_effort": "high"
+        }
+        if response_format_param is not None:
+            api_kwargs["response_format"] = response_format_param
+
+        # @retry(
+        #     stop=stop_after_attempt(3),
+        #     wait=wait_exponential(multiplier=1, min=1, max=10),
+        #     retry=retry_if_exception_type((APITimeoutError, APIConnectionError, APIError)),
+        #     reraise=True,
+        # )
+        # async def _call_api():
+        #     return await client.chat.completions.create(**api_kwargs)
+
+        response = await client.chat.completions.create(
                 model=model,
-                messages=[message.model_dump() for message in messages],
-                response_format=response_format_param,
+                messages=[message.model_dump() for message in actual_messages],
                 max_completion_tokens=max_tokens,
                 tools=all_tools,
                 extra_body=extra_body,
-            )
-
-        try:
-            logger.info(f"_generate_openai_structured: calling API with model={model}, depth={depth}")
-            logger.info(f"_generate_openai_structured: response_format_param type={response_format_param.get('type') if response_format_param else None}")
-            logger.info(f"_generate_openai_structured: tools count={len(all_tools) if all_tools else 0}, messages count={len(messages)}")
-            # Use wait_for for reliable timeout
-            response = await asyncio.wait_for(_call_api(), timeout=120.0)
-            logger.info(f"_generate_openai_structured: received response (depth={depth})")
-        except APITimeoutError as e:
-            logger.error(f"_generate_openai_structured: timeout after retries (depth={depth})")
-            raise HTTPException(
-                status_code=504,
-                detail=f"LLM request timed out after retries: {str(e)}",
-            )
-        except APIConnectionError as e:
-            logger.error(f"_generate_openai_structured: connection error (depth={depth})")
-            raise HTTPException(
-                status_code=503,
-                detail=f"Failed to connect to LLM service after retries: {str(e)}",
-            )
-        except APIStatusError as e:
-            logger.error(f"_generate_openai_structured: API status error {e.status_code} (depth={depth})")
-            raise HTTPException(
-                status_code=e.status_code if e.status_code < 1000 else 500,
-                detail=f"LLM API error (code {e.status_code}): {str(e)}",
-            )
-        except APIError as e:
-            logger.error(f"_generate_openai_structured: API error (depth={depth})")
-            raise HTTPException(
-                status_code=500,
-                detail=f"LLM API error after retries: {str(e)}",
-            )
-        except (asyncio.TimeoutError, TimeoutError) as e:
-            logger.error(f"_generate_openai_structured: timeout after 120s (depth={depth}, error={type(e).__name__})")
-            raise HTTPException(
-                status_code=504,
-                detail="LLM request timed out after 120 seconds",
+                response_format=response_format_param,
             )
 
         if len(response.choices) == 0:
-            logger.warning(f"_generate_openai_structured: empty choices in response (depth={depth})")
+            print(f"[LLM] empty choices in response (depth={depth})")
             return None
 
         content = response.choices[0].message.content
-        logger.debug(f"_generate_openai_structured: content={'present' if content else 'empty'} (depth={depth})")
+        print(f"[LLM] content={'present' if content else 'empty'}, len={len(content) if content else 0}")
 
         tool_calls = response.choices[0].message.tool_calls
         has_response_schema = False
-        logger.debug(f"_generate_openai_structured: tool_calls={len(tool_calls) if tool_calls else 0} (depth={depth})")
+        print(f"[LLM] tool_calls={len(tool_calls) if tool_calls else 0}")
 
         if tool_calls:
             for tool_call in tool_calls:
@@ -665,7 +691,15 @@ class LLMClient:
                 )
         if content:
             if depth == 0:
-                return dict(dirtyjson.loads(content))
+                print(f"[LLM] parsing JSON, first 100 chars: {content[:100]}")
+                try:
+                    result = dict(dirtyjson.loads(content))
+                    print(f"[LLM] JSON parsed successfully")
+                    return result
+                except Exception as e:
+                    print(f"[LLM] JSON parse error: {e}")
+                    print(f"[LLM] raw content: {content[:500]}")
+                    raise
             return content
         return None
 
@@ -1282,11 +1316,19 @@ class LLMClient:
 
         # Determine the response format based on provider and settings
         response_format_param = None
+        actual_messages = messages
         if not use_tool_calls_for_structured_output:
-            # vLLM and other custom providers may not support json_schema, use json_object instead
+            # vLLM and other custom providers may not support response_format,
+            # use prompt-based JSON schema instead
             if self.llm_provider in (LLMProvider.CUSTOM, LLMProvider.OLLAMA):
-                response_format_param = {"type": "json_object"}
-                logger.debug(f"_stream_openai_structured: using json_object format for {self.llm_provider}")
+                response_format_param = None
+                schema_instruction = self._build_json_schema_prompt(response_schema)
+                actual_messages = self._inject_schema_into_messages(
+                    messages, schema_instruction
+                )
+                logger.debug(
+                    f"_stream_openai_structured: using prompt-based JSON schema for {self.llm_provider}"
+                )
             else:
                 response_format_param = {
                     "type": "json_schema",
@@ -1304,15 +1346,20 @@ class LLMClient:
         current_arguments = None
 
         has_response_schema_tool_call = False
-        async for event in await client.chat.completions.create(
-            model=model,
-            messages=[message.model_dump() for message in messages],
-            max_completion_tokens=max_tokens,
-            tools=all_tools,
-            response_format=response_format_param,
-            extra_body=extra_body,
-            stream=True,
-        ):
+
+        # Build API call kwargs, only include response_format if not None
+        api_kwargs = {
+            "model": model,
+            "messages": [message.model_dump() for message in actual_messages],
+            "max_completion_tokens": max_tokens,
+            "tools": all_tools,
+            "extra_body": extra_body,
+            "stream": True,
+        }
+        if response_format_param is not None:
+            api_kwargs["response_format"] = response_format_param
+
+        async for event in await client.chat.completions.create(**api_kwargs):
             event: OpenAIChatCompletionChunk = event
             if not event.choices:
                 continue
