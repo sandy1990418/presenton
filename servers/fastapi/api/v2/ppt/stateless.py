@@ -11,6 +11,7 @@ All data is passed via JSON - no database storage required.
 import asyncio
 import json
 import os
+import time
 import traceback
 from typing import Optional
 
@@ -36,6 +37,17 @@ from services.temp_file_service import TEMP_FILE_SERVICE
 
 
 STATELESS_ROUTER = APIRouter(prefix="/stateless", tags=["Stateless PPT"])
+
+
+def _media_type_for_file(file_path: str) -> str:
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        return "application/pdf"
+    if ext == ".pptx":
+        return (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
+    return "application/octet-stream"
 
 
 # ====================
@@ -101,11 +113,7 @@ async def generate_presentation_stateless(
         )
 
         filename = os.path.basename(file_path)
-        media_type = (
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            if request.export_as == "pptx"
-            else "application/pdf"
-        )
+        media_type = _media_type_for_file(file_path)
 
         return FileResponse(
             file_path,
@@ -192,11 +200,14 @@ async def generate_presentation_stateless_stream(
 
             # Poll for progress while generation runs
             last_sent_message = ""
+            last_keepalive = time.monotonic()
+            keepalive_interval = 15.0
             while not generation_task.done():
                 if await request.is_disconnected():
                     generation_task.cancel()
                     return
 
+                now = time.monotonic()
                 if last_progress_message != last_sent_message:
                     progress_msg = SSEProgressMessage(
                         message=last_progress_message,
@@ -204,32 +215,32 @@ async def generate_presentation_stateless_stream(
                     )
                     yield f"data: {progress_msg.model_dump_json()}\n\n"
                     last_sent_message = last_progress_message
+                    last_keepalive = now
+                elif now - last_keepalive >= keepalive_interval:
+                    yield ": keepalive\n\n"
+                    last_keepalive = now
 
                 await asyncio.sleep(0.5)
 
-            file_path = await generation_task
-            filename = os.path.basename(file_path)
+                file_path = await generation_task
+                filename = os.path.basename(file_path)
 
-            # Determine media type
-            media_type = (
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                if export_as == "pptx"
-                else "application/pdf"
-            )
+                # Determine media type
+                media_type = _media_type_for_file(file_path)
 
-            # Store file for download
-            await STATELESS_TASK_STORE.store_file(
-                task_id=task_id,
-                file_path=file_path,
-                filename=filename,
-                media_type=media_type,
-            )
+                # Store file for download
+                await STATELESS_TASK_STORE.store_file(
+                    task_id=task_id,
+                    file_path=file_path,
+                    filename=filename,
+                    media_type=media_type,
+                )
 
-            # Send completion message
-            complete_msg = SSECompleteMessage(
-                download_url=f"/api/v2/ppt/stateless/download/{task_id}",
-            )
-            yield f"data: {complete_msg.model_dump_json()}\n\n"
+                # Send completion message
+                complete_msg = SSECompleteMessage(
+                    download_url=f"/api/v2/ppt/stateless/download/{task_id}",
+                )
+                yield f"data: {complete_msg.model_dump_json()}\n\n"
 
         except asyncio.CancelledError:
             return
@@ -342,11 +353,7 @@ async def generate_from_outline_stateless(
         )
 
         filename = os.path.basename(file_path)
-        media_type = (
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            if request.export_as == "pptx"
-            else "application/pdf"
-        )
+        media_type = _media_type_for_file(file_path)
 
         return FileResponse(
             file_path,
@@ -438,11 +445,7 @@ async def generate_from_outline_stateless_stream(
             file_path = await generation_task
             filename = os.path.basename(file_path)
 
-            media_type = (
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                if request.export_as == "pptx"
-                else "application/pdf"
-            )
+            media_type = _media_type_for_file(file_path)
 
             await STATELESS_TASK_STORE.store_file(
                 task_id=task_id,

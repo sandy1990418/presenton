@@ -297,9 +297,16 @@ class PptxPresentationCreator:
             "__speaker_note__": "講者備註"
         }
         """
-        template_ppt = Presentation(template_path)
-        slide_width = template_ppt.slide_width.pt
-        slide_height = template_ppt.slide_height.pt
+        if template_path and os.path.exists(template_path):
+            template_ppt = Presentation(template_path)
+            slide_width = template_ppt.slide_width.pt
+            slide_height = template_ppt.slide_height.pt
+        else:
+            template_ppt = Presentation()
+            template_ppt.slide_width = Pt(1280)
+            template_ppt.slide_height = Pt(720)
+            slide_width = template_ppt.slide_width.pt
+            slide_height = template_ppt.slide_height.pt
 
         grid_calc = ImageGridCalculator(slide_width, slide_height)
         slides = []

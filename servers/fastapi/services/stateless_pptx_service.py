@@ -164,6 +164,36 @@ class StatelessPptxService:
             )
 
         presentation_outlines = PresentationOutlineModel(**outlines_json)
+        total_outlines = n_slides_to_generate
+
+        if include_table_of_contents:
+            n_toc_slides = n_slides - total_outlines
+            outline_index = 1 if include_title_slide else 0
+            for i in range(n_toc_slides):
+                outlines_to = outline_index + 10
+                if total_outlines == outlines_to:
+                    outlines_to -= 1
+
+                toc_outline = "Table of Contents\n\n"
+                for outline in presentation_outlines.slides[
+                    outline_index:outlines_to
+                ]:
+                    page_number = (
+                        outline_index - i + n_toc_slides + 1
+                        if include_title_slide
+                        else outline_index - i + n_toc_slides
+                    )
+                    toc_outline += f"Slide page number: {page_number}\n Slide Content: {outline.content[:100]}\n\n"
+                    outline_index += 1
+
+                outline_index += 1
+
+                presentation_outlines.slides.insert(
+                    i + 1 if include_title_slide else i,
+                    SlideOutlineModel(
+                        content=toc_outline,
+                    ),
+                )
         title = get_presentation_title_from_outlines(presentation_outlines)
 
         return StatelessOutlineResponse(
@@ -238,6 +268,15 @@ class StatelessPptxService:
                 layout_model,
                 instructions,
             )
+
+        toc_layout_index = select_toc_or_list_slide_layout_index(layout_model)
+        if toc_layout_index != -1:
+            for index, outline in enumerate(outlines.slides):
+                if not outline.content:
+                    continue
+                if outline.content.strip().lower().startswith("table of contents"):
+                    if index < len(presentation_structure.slides):
+                        presentation_structure.slides[index] = toc_layout_index
 
         # Ensure structure matches outlines
         presentation_structure.slides = presentation_structure.slides[:total_outlines]
