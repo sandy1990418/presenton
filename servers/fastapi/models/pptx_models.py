@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, List, Literal, Optional, Dict
 from annotated_types import Len
 from pydantic import BaseModel
 from pptx.util import Pt
@@ -106,6 +106,19 @@ class PptxPictureModel(BaseModel):
     path: str
 
 
+# ==================== 新增 ====================
+
+class PptxStructureModel(BaseModel):
+    """用於控制 placeholder 填充的結構"""
+    level: int = 0
+    isList: bool = True
+    placeholder_idx: int = 1  # 0 = title, 1 = content
+    column: Optional[int] = None  # None = 單欄, 0/1/2/3 = 第幾欄
+    num_columns: Optional[int] = None  # 總共幾欄
+
+
+# ==================== 原有的 Shape Models ====================
+
 class PptxShapeModel(BaseModel):
     shape_type: Literal["textbox", "autoshape", "picture", "connector"]
 
@@ -117,6 +130,7 @@ class PptxTextBoxModel(PptxShapeModel):
     position: PptxPositionModel
     text_wrap: bool = True
     paragraphs: List[PptxParagraphModel]
+    structure: Optional[PptxStructureModel] = None  # 新增
 
 
 class PptxAutoShapeBoxModel(PptxShapeModel):
@@ -154,14 +168,31 @@ class PptxConnectorModel(PptxShapeModel):
     opacity: float = 1.0
 
 
+class PptxTableCellModel(BaseModel):
+    text: str
+
+
+class PptxTableModel(PptxShapeModel):
+    shape_type: Literal["table"] = "table"
+    position: PptxPositionModel
+    rows: List[List[PptxTableCellModel]]
+    header_row: bool = True
+    font: Optional[PptxFontModel] = None
+    header_font: Optional[PptxFontModel] = None
+    header_fill: Optional[PptxFillModel] = None
+    cell_fill: Optional[PptxFillModel] = None
+
+
 class PptxSlideModel(BaseModel):
     background: Optional[PptxFillModel] = None
     note: Optional[str] = None
+    layout_index: int = 6  # 新增
     shapes: List[
         PptxTextBoxModel
         | PptxAutoShapeBoxModel
         | PptxConnectorModel
         | PptxPictureBoxModel
+        | PptxTableModel
     ]
 
 
