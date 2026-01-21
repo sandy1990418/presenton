@@ -274,6 +274,10 @@ async def generate_outline_stateless(
 
     Returns outlines that can be reviewed and adjusted by the user
     before generating the full presentation.
+    
+    The response includes generation_context which carries all settings
+    to Step 2, so frontend only needs to pass the response back with
+    any outline adjustments.
     """
     if not request.content:
         raise HTTPException(
@@ -300,6 +304,7 @@ async def generate_outline_stateless(
             include_table_of_contents=request.include_table_of_contents,
             include_title_slide=request.include_title_slide,
             web_search=request.web_search,
+            template=request.template,
         )
         return response
 
@@ -322,6 +327,19 @@ async def generate_from_outline_stateless(
 
     Takes the (potentially modified) outlines from step 1 and
     generates the complete presentation.
+    
+    Frontend can pass the entire Step 1 response back:
+    ```json
+    {
+        "title": "My Presentation",
+        "outlines": {...},
+        "generation_context": {"language": "English", "tone": "professional", "template": "general", "source_summary": "...", ...},
+        "export_as": "pptx"
+    }
+    ```
+    
+    The generation_context from Step 1 carries all settings including template and source_summary.
+    The source_summary is used to prevent hallucination when generating slide content.
     """
     if not request.outlines.slides:
         raise HTTPException(
@@ -329,27 +347,33 @@ async def generate_from_outline_stateless(
             detail="Outlines are required",
         )
 
+    # Get template from context or fallback
+    template = request.get_template()
+    
     # Validate template
-    if request.template not in DEFAULT_TEMPLATES:
-        template_lower = request.template.lower()
+    if template not in DEFAULT_TEMPLATES:
+        template_lower = template.lower()
         if not template_lower.startswith("custom-"):
             raise HTTPException(
                 status_code=400,
                 detail="Template not found. Please use a valid template.",
             )
-        request.template = template_lower
+        template = template_lower
 
     try:
         service = StatelessPptxService()
 
+        # Use getter methods to get settings from context or fallback
         file_path = await service.generate_pptx_from_outlines(
             outlines=request.outlines,
-            template=request.template,
-            language=request.language,
-            tone=request.tone,
-            verbosity=request.verbosity,
-            instructions=request.instructions,
+            template=template,
+            language=request.get_language(),
+            tone=request.get_tone(),
+            verbosity=request.get_verbosity(),
+            instructions=request.get_instructions(),
             title=request.title,
+            source_summary=request.get_source_summary(),  # Legacy fallback
+            source_chunks=request.get_source_chunks(),    # Chunked context for per-slide reference
         )
 
         filename = os.path.basename(file_path)
@@ -378,6 +402,9 @@ async def generate_from_outline_stateless_stream(
 ):
     """
     Step 2 with SSE: Generate presentation from outlines with progress updates.
+    
+    Supports passing generation_context from Step 1 response, including source_chunks
+    for per-slide context and hallucination prevention.
     """
     if not request.outlines.slides:
         raise HTTPException(
@@ -385,15 +412,24 @@ async def generate_from_outline_stateless_stream(
             detail="Outlines are required",
         )
 
+    # Extract settings using getter methods (supports generation_context)
+    template = request.get_template()
+    language = request.get_language()
+    tone = request.get_tone()
+    verbosity = request.get_verbosity()
+    instructions = request.get_instructions()
+    source_summary = request.get_source_summary()
+    source_chunks = request.get_source_chunks()
+
     # Validate template
-    if request.template not in DEFAULT_TEMPLATES:
-        template_lower = request.template.lower()
+    if template not in DEFAULT_TEMPLATES:
+        template_lower = template.lower()
         if not template_lower.startswith("custom-"):
             raise HTTPException(
                 status_code=400,
                 detail="Template not found. Please use a valid template.",
             )
-        request.template = template_lower
+        template = template_lower
 
     async def event_generator():
         task_id = STATELESS_TASK_STORE.create_task_id()
@@ -408,16 +444,18 @@ async def generate_from_outline_stateless_stream(
         try:
             service = StatelessPptxService()
 
-            # Start generation task
+            # Start generation task with settings from context or fallback
             generation_task = asyncio.create_task(
                 service.generate_pptx_from_outlines(
                     outlines=request.outlines,
-                    template=request.template,
-                    language=request.language,
-                    tone=request.tone,
-                    verbosity=request.verbosity,
-                    instructions=request.instructions,
+                    template=template,
+                    language=language,
+                    tone=tone,
+                    verbosity=verbosity,
+                    instructions=instructions,
                     title=request.title,
+                    source_summary=source_summary,  # Legacy fallback
+                    source_chunks=source_chunks,    # Chunked context
                     progress_callback=progress_callback,
                 )
             )

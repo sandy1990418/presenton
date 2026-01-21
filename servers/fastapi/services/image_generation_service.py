@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from google import genai
 from openai import NOT_GIVEN, AsyncOpenAI
 from models.image_prompt import ImagePrompt
-from models.sql.image_asset import ImageAsset
+from models.stateless_models import ImageAssetData
 from utils.get_env import (
     get_dall_e_3_quality_env,
     get_gpt_image_1_5_quality_env,
@@ -59,7 +59,7 @@ class ImageGenerationService:
     def is_stock_provider_selected(self):
         return is_pixels_selected() or is_pixabay_selected()
 
-    async def generate_image(self, prompt: ImagePrompt) -> str | ImageAsset:
+    async def generate_image(self, prompt: ImagePrompt) -> str | ImageAssetData:
         """
         Generates an image based on the provided prompt.
         - If no image generation function is available, returns a placeholder image.
@@ -110,7 +110,7 @@ class ImageGenerationService:
                     # Convert local path to static file URL
                     filename = os.path.basename(image_path)
                     static_url = f"http://localhost:8000/app_data/images/{filename}"
-                    return ImageAsset(
+                    return ImageAssetData(
                         path=static_url,
                         is_uploaded=False,
                         extras={

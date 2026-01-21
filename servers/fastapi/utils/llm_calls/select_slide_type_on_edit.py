@@ -1,7 +1,7 @@
+from typing import Any, Dict
 from models.llm_message import LLMSystemMessage, LLMUserMessage
 from models.presentation_layout import PresentationLayoutModel, SlideLayoutModel
 from models.slide_layout_index import SlideLayoutIndex
-from models.sql.slide import SlideModel
 from services.llm_client import LLMClient
 from utils.llm_client_error_handler import handle_llm_client_exceptions
 from utils.llm_provider import get_model
@@ -39,20 +39,29 @@ def get_messages(
 async def get_slide_layout_from_prompt(
     prompt: str,
     layout: PresentationLayoutModel,
-    slide: SlideModel,
+    slide_content: Dict[str, Any],
+    slide_layout: str,
 ) -> SlideLayoutModel:
-
+    """
+    Select a slide layout based on the prompt and current slide data.
+    
+    Args:
+        prompt: The user's edit instruction
+        layout: The presentation layout model
+        slide_content: The slide content dict (replaces SlideModel.content)
+        slide_layout: The current slide layout name (replaces SlideModel.layout)
+    """
     client = LLMClient()
     model = get_model()
 
-    slide_layout_index = layout.get_slide_layout_index(slide.layout)
+    slide_layout_index = layout.get_slide_layout_index(slide_layout)
 
     try:
         response = await client.generate_structured(
             model=model,
             messages=get_messages(
                 prompt,
-                slide.content,
+                slide_content,
                 layout,
                 slide_layout_index,
             ),
