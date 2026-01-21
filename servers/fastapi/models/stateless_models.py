@@ -14,10 +14,6 @@ from enums.verbosity import Verbosity
 from models.presentation_outline_model import PresentationOutlineModel
 
 
-# ====================
-# Pure Data Classes (No SQL dependency)
-# ====================
-
 
 @dataclass
 class ImageAssetData:

@@ -2,52 +2,38 @@
 Stateless PPT Generation API v2
 
 Provides database-free presentation generation with two paths:
-1. Quick path: One-step generation (outline → slides → export)
+1. Quick path: One-step generation (outline -> slides -> export)
 2. Two-step path: Generate outline first, user adjusts, then generate
 
 All data is passed via JSON - no database storage required.
 """
 
-import asyncio
-import json
 import os
-import time
 import traceback
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 
-from constants.presentation import DEFAULT_TEMPLATES
 from enums.tone import Tone
 from enums.verbosity import Verbosity
-from models.presentation_outline_model import PresentationOutlineModel
 from models.stateless_models import (
-    SSECompleteMessage,
-    SSEErrorMessage,
-    SSEProgressMessage,
     StatelessGenerateFromOutlineRequest,
     StatelessGenerateRequest,
     StatelessOutlineRequest,
     StatelessOutlineResponse,
 )
-from services.stateless_pptx_service import StatelessPptxService
+from services.stateless_flow_service import StatelessFlowService
 from services.stateless_task_store import STATELESS_TASK_STORE
-from services.temp_file_service import TEMP_FILE_SERVICE
+from api.v2.ppt.stateless_responses import build_file_response
+from api.v2.ppt.stateless_streaming import (
+    build_sse_response,
+    stream_generate_from_outline,
+    stream_generate_presentation,
+)
 
 
 STATELESS_ROUTER = APIRouter(prefix="/stateless", tags=["Stateless PPT"])
-
-
-def _media_type_for_file(file_path: str) -> str:
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".pdf":
-        return "application/pdf"
-    if ext == ".pptx":
-        return (
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        )
-    return "application/octet-stream"
 
 
 # ====================
@@ -70,56 +56,9 @@ async def generate_presentation_stateless(
 
     Returns the file directly as a download.
     """
-    # Validate input
-    if not (request.content or request.slides_markdown or request.files):
-        raise HTTPException(
-            status_code=400,
-            detail="Either content, slides_markdown, or files is required",
-        )
-
-    if request.n_slides <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Number of slides must be greater than 0",
-        )
-
-    # Validate template
-    if request.template not in DEFAULT_TEMPLATES:
-        template_lower = request.template.lower()
-        if not template_lower.startswith("custom-"):
-            raise HTTPException(
-                status_code=400,
-                detail="Template not found. Please use a valid template.",
-            )
-        request.template = template_lower
-
     try:
-        service = StatelessPptxService()
-
-        file_path = await service.generate_full_presentation(
-            content=request.content,
-            n_slides=request.n_slides,
-            language=request.language,
-            template=request.template,
-            slides_markdown=request.slides_markdown,
-            files=request.files,
-            tone=request.tone,
-            verbosity=request.verbosity,
-            instructions=request.instructions,
-            include_table_of_contents=request.include_table_of_contents,
-            include_title_slide=request.include_title_slide,
-            web_search=request.web_search,
-            export_as=request.export_as,
-        )
-
-        filename = os.path.basename(file_path)
-        media_type = _media_type_for_file(file_path)
-
-        return FileResponse(
-            file_path,
-            media_type=media_type,
-            filename=filename,
-        )
+        file_path = await StatelessFlowService.generate_full_presentation(request)
+        return build_file_response(file_path)
 
     except HTTPException:
         raise
@@ -159,104 +98,24 @@ async def generate_presentation_stateless_stream(
             detail="Content is required",
         )
 
-    if template not in DEFAULT_TEMPLATES:
-        template_lower = template.lower()
-        if not template_lower.startswith("custom-"):
-            raise HTTPException(
-                status_code=400,
-                detail="Template not found. Please use a valid template.",
-            )
-        template = template_lower
+    template = StatelessFlowService.normalize_template(template)
+    export_as = StatelessFlowService.normalize_export_as(export_as)
 
-    async def event_generator():
-        task_id = STATELESS_TASK_STORE.create_task_id()
-        last_progress_message = ""
-
-        def progress_callback(message: str, progress: float):
-            nonlocal last_progress_message
-            last_progress_message = message
-            # We'll yield this in the next iteration
-
-        try:
-            service = StatelessPptxService()
-
-            # Start generation in a task so we can yield progress
-            generation_task = asyncio.create_task(
-                service.generate_full_presentation(
-                    content=content,
-                    n_slides=n_slides,
-                    language=language,
-                    template=template,
-                    tone=tone,
-                    verbosity=verbosity,
-                    instructions=instructions,
-                    include_table_of_contents=include_table_of_contents,
-                    include_title_slide=include_title_slide,
-                    web_search=web_search,
-                    export_as=export_as if export_as in ("pptx", "pdf") else "pptx",
-                    progress_callback=progress_callback,
-                )
-            )
-
-            # Poll for progress while generation runs
-            last_sent_message = ""
-            last_keepalive = time.monotonic()
-            keepalive_interval = 15.0
-            while not generation_task.done():
-                if await request.is_disconnected():
-                    generation_task.cancel()
-                    return
-
-                now = time.monotonic()
-                if last_progress_message != last_sent_message:
-                    progress_msg = SSEProgressMessage(
-                        message=last_progress_message,
-                        progress=0.5,  # Approximate progress
-                    )
-                    yield f"data: {progress_msg.model_dump_json()}\n\n"
-                    last_sent_message = last_progress_message
-                    last_keepalive = now
-                elif now - last_keepalive >= keepalive_interval:
-                    yield ": keepalive\n\n"
-                    last_keepalive = now
-
-                await asyncio.sleep(0.5)
-
-                file_path = await generation_task
-                filename = os.path.basename(file_path)
-
-                # Determine media type
-                media_type = _media_type_for_file(file_path)
-
-                # Store file for download
-                await STATELESS_TASK_STORE.store_file(
-                    task_id=task_id,
-                    file_path=file_path,
-                    filename=filename,
-                    media_type=media_type,
-                )
-
-                # Send completion message
-                complete_msg = SSECompleteMessage(
-                    download_url=f"/api/v2/ppt/stateless/download/{task_id}",
-                )
-                yield f"data: {complete_msg.model_dump_json()}\n\n"
-
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            traceback.print_exc()
-            error_msg = SSEErrorMessage(detail=str(e))
-            yield f"data: {error_msg.model_dump_json()}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+    return build_sse_response(
+        stream_generate_presentation(
+            request,
+            content=content,
+            n_slides=n_slides,
+            language=language,
+            template=template,
+            tone=tone,
+            verbosity=verbosity,
+            instructions=instructions,
+            include_table_of_contents=include_table_of_contents,
+            include_title_slide=include_title_slide,
+            web_search=web_search,
+            export_as=export_as,
+        )
     )
 
 
@@ -274,39 +133,13 @@ async def generate_outline_stateless(
 
     Returns outlines that can be reviewed and adjusted by the user
     before generating the full presentation.
-    
+
     The response includes generation_context which carries all settings
     to Step 2, so frontend only needs to pass the response back with
     any outline adjustments.
     """
-    if not request.content:
-        raise HTTPException(
-            status_code=400,
-            detail="Content is required",
-        )
-
-    if request.n_slides <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Number of slides must be greater than 0",
-        )
-
     try:
-        service = StatelessPptxService()
-        response = await service.generate_outlines(
-            content=request.content,
-            n_slides=request.n_slides,
-            language=request.language,
-            files=request.files,
-            tone=request.tone,
-            verbosity=request.verbosity,
-            instructions=request.instructions,
-            include_table_of_contents=request.include_table_of_contents,
-            include_title_slide=request.include_title_slide,
-            web_search=request.web_search,
-            template=request.template,
-        )
-        return response
+        return await StatelessFlowService.generate_outlines(request)
 
     except HTTPException:
         raise
@@ -327,7 +160,7 @@ async def generate_from_outline_stateless(
 
     Takes the (potentially modified) outlines from step 1 and
     generates the complete presentation.
-    
+
     Frontend can pass the entire Step 1 response back:
     ```json
     {
@@ -337,53 +170,13 @@ async def generate_from_outline_stateless(
         "export_as": "pptx"
     }
     ```
-    
+
     The generation_context from Step 1 carries all settings including template and source_summary.
     The source_summary is used to prevent hallucination when generating slide content.
     """
-    if not request.outlines.slides:
-        raise HTTPException(
-            status_code=400,
-            detail="Outlines are required",
-        )
-
-    # Get template from context or fallback
-    template = request.get_template()
-    
-    # Validate template
-    if template not in DEFAULT_TEMPLATES:
-        template_lower = template.lower()
-        if not template_lower.startswith("custom-"):
-            raise HTTPException(
-                status_code=400,
-                detail="Template not found. Please use a valid template.",
-            )
-        template = template_lower
-
     try:
-        service = StatelessPptxService()
-
-        # Use getter methods to get settings from context or fallback
-        file_path = await service.generate_pptx_from_outlines(
-            outlines=request.outlines,
-            template=template,
-            language=request.get_language(),
-            tone=request.get_tone(),
-            verbosity=request.get_verbosity(),
-            instructions=request.get_instructions(),
-            title=request.title,
-            source_summary=request.get_source_summary(),  # Legacy fallback
-            source_chunks=request.get_source_chunks(),    # Chunked context for per-slide reference
-        )
-
-        filename = os.path.basename(file_path)
-        media_type = _media_type_for_file(file_path)
-
-        return FileResponse(
-            file_path,
-            media_type=media_type,
-            filename=filename,
-        )
+        file_path = await StatelessFlowService.generate_from_outline(request)
+        return build_file_response(file_path)
 
     except HTTPException:
         raise
@@ -402,116 +195,19 @@ async def generate_from_outline_stateless_stream(
 ):
     """
     Step 2 with SSE: Generate presentation from outlines with progress updates.
-    
+
     Supports passing generation_context from Step 1 response, including source_chunks
     for per-slide context and hallucination prevention.
     """
-    if not request.outlines.slides:
-        raise HTTPException(
-            status_code=400,
-            detail="Outlines are required",
+    StatelessFlowService.validate_from_outline_request(request)
+    template = StatelessFlowService.normalize_template(request.get_template())
+
+    return build_sse_response(
+        stream_generate_from_outline(
+            http_request,
+            request=request,
+            template=template,
         )
-
-    # Extract settings using getter methods (supports generation_context)
-    template = request.get_template()
-    language = request.get_language()
-    tone = request.get_tone()
-    verbosity = request.get_verbosity()
-    instructions = request.get_instructions()
-    source_summary = request.get_source_summary()
-    source_chunks = request.get_source_chunks()
-
-    # Validate template
-    if template not in DEFAULT_TEMPLATES:
-        template_lower = template.lower()
-        if not template_lower.startswith("custom-"):
-            raise HTTPException(
-                status_code=400,
-                detail="Template not found. Please use a valid template.",
-            )
-        template = template_lower
-
-    async def event_generator():
-        task_id = STATELESS_TASK_STORE.create_task_id()
-        progress_queue: asyncio.Queue[tuple[str, float]] = asyncio.Queue()
-
-        def progress_callback(message: str, progress: float):
-            try:
-                progress_queue.put_nowait((message, progress))
-            except asyncio.QueueFull:
-                pass
-
-        try:
-            service = StatelessPptxService()
-
-            # Start generation task with settings from context or fallback
-            generation_task = asyncio.create_task(
-                service.generate_pptx_from_outlines(
-                    outlines=request.outlines,
-                    template=template,
-                    language=language,
-                    tone=tone,
-                    verbosity=verbosity,
-                    instructions=instructions,
-                    title=request.title,
-                    source_summary=source_summary,  # Legacy fallback
-                    source_chunks=source_chunks,    # Chunked context
-                    progress_callback=progress_callback,
-                )
-            )
-
-            # Send progress updates
-            while not generation_task.done():
-                if await http_request.is_disconnected():
-                    generation_task.cancel()
-                    return
-
-                try:
-                    message, progress = await asyncio.wait_for(
-                        progress_queue.get(),
-                        timeout=1.0,
-                    )
-                    progress_msg = SSEProgressMessage(
-                        message=message,
-                        progress=progress,
-                    )
-                    yield f"data: {progress_msg.model_dump_json()}\n\n"
-                except asyncio.TimeoutError:
-                    # Send keepalive
-                    yield ": keepalive\n\n"
-
-            file_path = await generation_task
-            filename = os.path.basename(file_path)
-
-            media_type = _media_type_for_file(file_path)
-
-            await STATELESS_TASK_STORE.store_file(
-                task_id=task_id,
-                file_path=file_path,
-                filename=filename,
-                media_type=media_type,
-            )
-
-            complete_msg = SSECompleteMessage(
-                download_url=f"/api/v2/ppt/stateless/download/{task_id}",
-            )
-            yield f"data: {complete_msg.model_dump_json()}\n\n"
-
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            traceback.print_exc()
-            error_msg = SSEErrorMessage(detail=str(e))
-            yield f"data: {error_msg.model_dump_json()}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
     )
 
 

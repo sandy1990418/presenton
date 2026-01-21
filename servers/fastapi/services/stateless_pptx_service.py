@@ -11,7 +11,7 @@ import os
 import random
 import traceback
 import uuid
-from typing import AsyncGenerator, Callable, List, Literal, Optional, Tuple
+from typing import Callable, List, Literal, Optional
 
 import aiohttp
 import dirtyjson
@@ -29,12 +29,11 @@ from models.presentation_outline_model import (
 from models.presentation_structure_model import PresentationStructureModel
 from models.pptx_models import PptxPresentationModel
 from models.stateless_models import (
-    SSECompleteMessage,
-    SSEErrorMessage,
-    SSEProgressMessage,
+    SourceChunk,
     StatelessGenerationContext,
     StatelessOutlineResponse,
 )
+from services.document_chunker import DocumentChunker, format_chunk_content_for_slide
 from services.documents_loader import DocumentsLoader
 from services.image_generation_service import ImageGenerationService
 from services.pptx_presentation_creator import PptxPresentationCreator
@@ -51,10 +50,7 @@ from utils.ppt_utils import (
     get_presentation_title_from_outlines,
     select_toc_or_list_slide_layout_index,
 )
-from utils.process_slides import (
-    convert_file_path_to_web_url,
-    process_slide_and_fetch_assets,
-)
+from utils.process_slides import process_slide_and_fetch_assets
 
 
 class StatelessSlideData:
@@ -88,11 +84,51 @@ class StatelessPptxService:
         self._temp_dir = temp_dir or TEMP_FILE_SERVICE.create_temp_dir()
         self._image_service = ImageGenerationService(self._temp_dir)
 
+    async def _prepare_source_context(
+        self,
+        files: Optional[List[str]],
+    ) -> tuple[str, Optional[List[SourceChunk]], Optional[str], Optional[List[dict]]]:
+        additional_context = ""
+        source_chunks: Optional[List[SourceChunk]] = None
+        source_summary: Optional[str] = None
+        chunks_for_prompt: Optional[List[dict]] = None
+
+        if not files:
+            return additional_context, source_chunks, source_summary, chunks_for_prompt
+
+        documents_loader = DocumentsLoader(file_paths=files)
+        await documents_loader.load_documents()
+        documents = [doc for doc in documents_loader.documents if doc and doc.strip()]
+        if not documents:
+            return additional_context, source_chunks, source_summary, chunks_for_prompt
+
+        additional_context = "\n\n---\n\n".join(documents)
+
+        chunker = DocumentChunker()
+        chunks = await chunker.chunk_documents(additional_context, generate_summaries=True)
+        if not chunks and additional_context.strip():
+            fallback_chunker = DocumentChunker(min_chunk_size=1)
+            chunks = await fallback_chunker.chunk_documents(
+                additional_context, generate_summaries=True
+            )
+
+        if chunks:
+            source_chunks = [SourceChunk(**chunk.to_dict()) for chunk in chunks]
+            chunks_for_prompt = [chunk.to_dict() for chunk in chunks]
+            summaries = [chunk.summary for chunk in chunks if chunk.summary]
+            if summaries:
+                source_summary = "\n".join(f"- {summary}" for summary in summaries)
+                if len(source_summary) > 2000:
+                    source_summary = source_summary[:1997] + "..."
+
+        return additional_context, source_chunks, source_summary, chunks_for_prompt
+
     async def generate_outlines(
         self,
         content: str,
         n_slides: int,
         language: str,
+        template: str = "general",
         files: Optional[List[str]] = None,
         tone: Tone = Tone.DEFAULT,
         verbosity: Verbosity = Verbosity.STANDARD,
@@ -108,6 +144,7 @@ class StatelessPptxService:
             content: Main presentation topic/content
             n_slides: Target number of slides
             language: Output language
+            template: Template name (passed through generation context)
             files: Optional file paths for additional context
             tone: Presentation tone
             verbosity: Content verbosity level
@@ -119,13 +156,12 @@ class StatelessPptxService:
         Returns:
             StatelessOutlineResponse with generated outlines
         """
-        additional_context = ""
-
-        if files:
-            documents_loader = DocumentsLoader(file_paths=files)
-            await documents_loader.load_documents()
-            if documents_loader.documents:
-                additional_context = "\n\n".join(documents_loader.documents)
+        (
+            additional_context,
+            source_chunks,
+            source_summary,
+            chunks_for_prompt,
+        ) = await self._prepare_source_context(files)
 
         # Calculate slides to generate (accounting for TOC)
         n_slides_to_generate = n_slides
@@ -149,6 +185,7 @@ class StatelessPptxService:
             instructions,
             include_title_slide,
             web_search,
+            chunks=chunks_for_prompt,
         ):
             if isinstance(chunk, HTTPException):
                 raise chunk
@@ -207,6 +244,9 @@ class StatelessPptxService:
                 include_table_of_contents=include_table_of_contents,
                 include_title_slide=include_title_slide,
                 n_slides=n_slides,
+                template=template,
+                source_summary=source_summary,
+                source_chunks=source_chunks,
             ),
         )
 
@@ -219,6 +259,8 @@ class StatelessPptxService:
         verbosity: Verbosity = Verbosity.STANDARD,
         instructions: Optional[str] = None,
         title: Optional[str] = None,
+        source_summary: Optional[str] = None,
+        source_chunks: Optional[List[SourceChunk]] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None,
     ) -> str:
         """
@@ -232,6 +274,8 @@ class StatelessPptxService:
             verbosity: Content verbosity
             instructions: Custom instructions
             title: Optional presentation title
+            source_summary: Optional source document summary
+            source_chunks: Optional source chunks for slide context
             progress_callback: Optional callback for progress updates
 
         Returns:
@@ -298,6 +342,8 @@ class StatelessPptxService:
             tone.value,
             verbosity.value,
             instructions,
+            source_summary,
+            source_chunks,
             progress_callback=lambda p: report_progress(
                 "Generating slide content...", 0.2 + p * 0.4
             ),
@@ -394,6 +440,8 @@ class StatelessPptxService:
         tone: str,
         verbosity: str,
         instructions: Optional[str],
+        source_summary: Optional[str] = None,
+        source_chunks: Optional[List[SourceChunk]] = None,
         progress_callback: Optional[Callable[[float], None]] = None,
     ) -> List[StatelessSlideData]:
         """Generate slide content from outlines."""
@@ -403,11 +451,20 @@ class StatelessPptxService:
         # Use semaphore to limit concurrent requests
         semaphore = asyncio.Semaphore(5)
 
+        def build_source_context(outline) -> Optional[str]:
+            chunk_refs = getattr(outline, "chunk_refs", None)
+            if source_chunks and chunk_refs:
+                return format_chunk_content_for_slide(source_chunks, chunk_refs)
+            if source_summary and (chunk_refs is None or not source_chunks):
+                return f"## Source Summary\n{source_summary}"
+            return None
+
         async def generate_with_semaphore(
             slide_layout,
             outline,
         ):
             async with semaphore:
+                source_context = build_source_context(outline)
                 return await get_slide_content_from_type_and_outline(
                     slide_layout,
                     outline,
@@ -415,6 +472,7 @@ class StatelessPptxService:
                     tone,
                     verbosity,
                     instructions,
+                    source_context,
                 )
 
         # Generate content concurrently in batches
@@ -461,82 +519,11 @@ class StatelessPptxService:
         progress_callback: Optional[Callable[[float], None]] = None,
     ) -> None:
         """Fetch images and icons for slides."""
-        from utils.dict_utils import (
-            get_dict_at_path,
-            get_dict_paths_with_key,
-            set_dict_at_path,
-        )
-        from services.icon_finder_service import ICON_FINDER_SERVICE
-        from models.image_prompt import ImagePrompt
-
         total_slides = len(slides)
         for i, slide in enumerate(slides):
-            # Get image and icon paths
-            image_paths = get_dict_paths_with_key(slide.content, "__image_prompt__")
-            icon_paths = get_dict_paths_with_key(slide.content, "__icon_query__")
-
-            # Create tasks for images
-            image_tasks = []
-            for image_path in image_paths:
-                parent = get_dict_at_path(slide.content, image_path)
-                image_tasks.append(
-                    self._image_service.generate_image(
-                        ImagePrompt(prompt=parent["__image_prompt__"])
-                    )
-                )
-
-            # Create tasks for icons
-            icon_tasks = []
-            for icon_path in icon_paths:
-                parent = get_dict_at_path(slide.content, icon_path)
-                icon_tasks.append(
-                    ICON_FINDER_SERVICE.search_icons(parent["__icon_query__"])
-                )
-
-            # Execute all tasks
-            all_tasks = image_tasks + icon_tasks
-            if all_tasks:
-                try:
-                    results = await asyncio.wait_for(
-                        asyncio.gather(*all_tasks, return_exceptions=True),
-                        timeout=60,
-                    )
-                except asyncio.TimeoutError:
-                    results = (
-                        ["/static/images/placeholder.jpg"] * len(image_tasks)
-                        + [["placeholder-icon"]] * len(icon_tasks)
-                    )
-
-                # Process image results
-                for j, image_path in enumerate(image_paths):
-                    image_dict = get_dict_at_path(slide.content, image_path)
-                    result = results[j]
-
-                    if isinstance(result, Exception):
-                        image_dict["__image_url__"] = convert_file_path_to_web_url(
-                            "/static/images/placeholder.jpg"
-                        )
-                    elif hasattr(result, "path"):
-                        image_dict["__image_url__"] = convert_file_path_to_web_url(
-                            result.path
-                        )
-                    else:
-                        image_dict["__image_url__"] = convert_file_path_to_web_url(
-                            str(result)
-                        )
-                    set_dict_at_path(slide.content, image_path, image_dict)
-
-                # Process icon results
-                for j, icon_path in enumerate(icon_paths):
-                    icon_dict = get_dict_at_path(slide.content, icon_path)
-                    icon_result = results[len(image_tasks) + j]
-
-                    if icon_result and isinstance(icon_result, list) and len(icon_result) > 0:
-                        icon_dict["__icon_url__"] = icon_result[0]
-                    else:
-                        icon_dict["__icon_url__"] = "/static/icons/placeholder.svg"
-                    set_dict_at_path(slide.content, icon_path, icon_dict)
-
+            slide.content, _ = await process_slide_and_fetch_assets(
+                self._image_service, slide.content
+            )
             if progress_callback:
                 progress_callback((i + 1) / total_slides)
 
@@ -636,12 +623,15 @@ class StatelessPptxService:
                 slides=[SlideOutlineModel(content=md) for md in slides_markdown]
             )
             title = None
+            source_summary = None
+            source_chunks = None
         else:
             report_progress("Generating outlines...", 0.0)
             outline_response = await self.generate_outlines(
                 content=content,
                 n_slides=n_slides,
                 language=language,
+                template=template,
                 files=files,
                 tone=tone,
                 verbosity=verbosity,
@@ -652,6 +642,8 @@ class StatelessPptxService:
             )
             outlines = outline_response.outlines
             title = outline_response.title
+            source_summary = outline_response.generation_context.source_summary
+            source_chunks = outline_response.generation_context.source_chunks
 
         # Generate PPTX
         pptx_path = await self.generate_pptx_from_outlines(
@@ -662,6 +654,8 @@ class StatelessPptxService:
             verbosity=verbosity,
             instructions=instructions,
             title=title,
+            source_summary=source_summary,
+            source_chunks=source_chunks,
             progress_callback=lambda msg, prog: report_progress(
                 msg, 0.15 + prog * 0.85 if not slides_markdown else prog
             ),

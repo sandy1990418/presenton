@@ -1,9 +1,10 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 
 
 class SlideOutlineModel(BaseModel):
     content: str
+    chunk_refs: Optional[List[int]] = None
 
 
 class PresentationOutlineModel(BaseModel):

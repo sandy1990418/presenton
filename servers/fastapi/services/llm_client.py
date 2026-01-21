@@ -1,14 +1,21 @@
 import asyncio
 import dirtyjson
 import json
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, Awaitable, Callable, List, Optional, TypeVar
 from fastapi import HTTPException
 import logging
 from openai import AsyncOpenAI, APITimeoutError, APIConnectionError, APIError, APIStatusError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, RetryError, before_sleep_log
+from tenacity import (
+    AsyncRetrying,
+    stop_after_attempt,
+    wait_random_exponential,
+    retry_if_exception,
+    before_sleep_log,
+)
 
 # Configure logger for LLM client
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 from google import genai
 from google.genai.types import Content as GoogleContent, Part as GoogleContentPart
@@ -89,6 +96,49 @@ class LLMClient:
     # ? Disable thinking
     def disable_thinking(self) -> bool:
         return parse_bool_or_none(get_disable_thinking_env()) or False
+
+    def _is_retryable_openai_error(self, exc: Exception) -> bool:
+        if isinstance(exc, (APITimeoutError, APIConnectionError)):
+            return True
+        if isinstance(exc, APIStatusError):
+            return exc.status_code in {408, 409, 429, 500, 502, 503, 504, 529}
+        if isinstance(exc, APIError) and not isinstance(exc, APIStatusError):
+            return True
+        return False
+
+    async def _call_openai_with_retry(
+        self, call: Callable[[], Awaitable[T]], operation: str = "LLM request"
+    ) -> T:
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(3),
+                wait=wait_random_exponential(multiplier=1, max=10),
+                retry=retry_if_exception(self._is_retryable_openai_error),
+                before_sleep=before_sleep_log(logger, logging.WARNING),
+                reraise=True,
+            ):
+                with attempt:
+                    return await call()
+        except APITimeoutError as e:
+            raise HTTPException(
+                status_code=504,
+                detail=f"{operation} timed out after retries: {str(e)}",
+            )
+        except APIConnectionError as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to connect to LLM service after retries: {str(e)}",
+            )
+        except APIStatusError as e:
+            raise HTTPException(
+                status_code=e.status_code if e.status_code < 1000 else 500,
+                detail=f"LLM API error (code {e.status_code}): {str(e)}",
+            )
+        except APIError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"LLM API error after retries: {str(e)}",
+            )
 
     # ? Clients
     def _get_client(self):
@@ -249,44 +299,15 @@ IMPORTANT:
         depth: int = 0,
     ) -> str | None:
         client: AsyncOpenAI = self._client
-        
-        @retry(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type((APITimeoutError, APIConnectionError, APIError)),
-            reraise=True,
-        )
-        async def _call_api():
-            return await client.chat.completions.create(
+        response = await self._call_openai_with_retry(
+            lambda: client.chat.completions.create(
                 model=model,
                 messages=[message.model_dump() for message in messages],
                 max_completion_tokens=max_tokens,
                 tools=tools,
                 extra_body=extra_body,
             )
-
-        try:
-            response = await _call_api()
-        except APITimeoutError as e:
-            raise HTTPException(
-                status_code=504,
-                detail=f"LLM request timed out after retries: {str(e)}",
-            )
-        except APIConnectionError as e:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Failed to connect to LLM service after retries: {str(e)}",
-            )
-        except APIStatusError as e:
-            raise HTTPException(
-                status_code=e.status_code if e.status_code < 1000 else 500,
-                detail=f"LLM API error (code {e.status_code}): {str(e)}",
-            )
-        except APIError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"LLM API error after retries: {str(e)}",
-            )
+        )
 
         if len(response.choices) == 0:
             return None
@@ -617,24 +638,9 @@ IMPORTANT:
         }
         if response_format_param is not None:
             api_kwargs["response_format"] = response_format_param
-
-        # @retry(
-        #     stop=stop_after_attempt(3),
-        #     wait=wait_exponential(multiplier=1, min=1, max=10),
-        #     retry=retry_if_exception_type((APITimeoutError, APIConnectionError, APIError)),
-        #     reraise=True,
-        # )
-        # async def _call_api():
-        #     return await client.chat.completions.create(**api_kwargs)
-
-        response = await client.chat.completions.create(
-                model=model,
-                messages=[message.model_dump() for message in actual_messages],
-                max_completion_tokens=max_tokens,
-                tools=all_tools,
-                extra_body=extra_body,
-                response_format=response_format_param,
-            )
+        response = await self._call_openai_with_retry(
+            lambda: client.chat.completions.create(**api_kwargs)
+        )
 
         if len(response.choices) == 0:
             print(f"[LLM] empty choices in response (depth={depth})")
@@ -1728,14 +1734,16 @@ IMPORTANT:
     # ? Web search
     async def _search_openai(self, query: str) -> str:
         client: AsyncOpenAI = self._client
-        response = await client.responses.create(
-            model=get_model(),
-            tools=[
-                {
-                    "type": "web_search_preview",
-                }
-            ],
-            input=query,
+        response = await self._call_openai_with_retry(
+            lambda: client.responses.create(
+                model=get_model(),
+                tools=[
+                    {
+                        "type": "web_search_preview",
+                    }
+                ],
+                input=query,
+            )
         )
         return response.output_text
 
