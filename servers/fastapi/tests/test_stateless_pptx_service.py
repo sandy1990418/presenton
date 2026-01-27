@@ -368,14 +368,16 @@ class TestStatelessPptxServiceGeneratePptxFromOutlines:
     @pytest.fixture
     def mock_layout_model(self):
         """Create mock layout model."""
-        slide_layout = MagicMock(spec=SlideLayoutModel)
-        slide_layout.id = "template_1"
-
-        layout = MagicMock(spec=PresentationLayoutModel)
-        layout.name = "general"
-        layout.slides = [slide_layout, slide_layout, slide_layout]
-        layout.ordered = False
-        return layout
+        slide_layout = SlideLayoutModel(
+            id="template_1",
+            name="Title and Content",
+            json_schema={"title": "Title and Content"},
+        )
+        return PresentationLayoutModel(
+            name="general",
+            slides=[slide_layout, slide_layout, slide_layout],
+            ordered=False,
+        )
 
     @pytest.mark.anyio
     async def test_generate_pptx_invalid_template(self, service, sample_outlines):
@@ -525,13 +527,15 @@ class TestStatelessPptxServiceGenerateSlides:
     @pytest.fixture
     def mock_layout_model(self):
         """Create mock layout model."""
-        slide_layout = MagicMock(spec=SlideLayoutModel)
-        slide_layout.id = "template_1"
-
-        layout = MagicMock(spec=PresentationLayoutModel)
-        layout.name = "general"
-        layout.slides = [slide_layout]
-        return layout
+        slide_layout = SlideLayoutModel(
+            id="template_1",
+            name="Title and Content",
+            json_schema={"title": "Title and Content"},
+        )
+        return PresentationLayoutModel(
+            name="general",
+            slides=[slide_layout],
+        )
 
     @pytest.fixture
     def mock_structure(self):
@@ -928,11 +932,17 @@ class TestStatelessPptxServiceGeneratePdfFromSlides:
         mock_response.read = AsyncMock(return_value=b"%PDF-1.4 mock content")
 
         with patch('aiohttp.ClientSession') as mock_session_class:
-            mock_session = AsyncMock()
-            mock_session.post.return_value.__aenter__.return_value = mock_response
-            mock_session.__aenter__.return_value = mock_session
-            mock_session.__aexit__.return_value = None
-            mock_session_class.return_value = mock_session
+            post_context = AsyncMock()
+            post_context.__aenter__.return_value = mock_response
+            post_context.__aexit__.return_value = None
+
+            session = MagicMock()
+            session.post.return_value = post_context
+
+            session_context = AsyncMock()
+            session_context.__aenter__.return_value = session
+            session_context.__aexit__.return_value = None
+            mock_session_class.return_value = session_context
 
             result = await service.generate_pdf_from_slides(
                 slides_data=slides_data,
@@ -953,11 +963,17 @@ class TestStatelessPptxServiceGeneratePdfFromSlides:
         mock_response.text = AsyncMock(return_value="Internal Server Error")
 
         with patch('aiohttp.ClientSession') as mock_session_class:
-            mock_session = AsyncMock()
-            mock_session.post.return_value.__aenter__.return_value = mock_response
-            mock_session.__aenter__.return_value = mock_session
-            mock_session.__aexit__.return_value = None
-            mock_session_class.return_value = mock_session
+            post_context = AsyncMock()
+            post_context.__aenter__.return_value = mock_response
+            post_context.__aexit__.return_value = None
+
+            session = MagicMock()
+            session.post.return_value = post_context
+
+            session_context = AsyncMock()
+            session_context.__aenter__.return_value = session
+            session_context.__aexit__.return_value = None
+            mock_session_class.return_value = session_context
 
             with pytest.raises(HTTPException) as exc_info:
                 await service.generate_pdf_from_slides(
@@ -978,11 +994,17 @@ class TestStatelessPptxServiceGeneratePdfFromSlides:
         mock_response.read = AsyncMock(return_value=b"%PDF content")
 
         with patch('aiohttp.ClientSession') as mock_session_class:
-            mock_session = AsyncMock()
-            mock_session.post.return_value.__aenter__.return_value = mock_response
-            mock_session.__aenter__.return_value = mock_session
-            mock_session.__aexit__.return_value = None
-            mock_session_class.return_value = mock_session
+            post_context = AsyncMock()
+            post_context.__aenter__.return_value = mock_response
+            post_context.__aexit__.return_value = None
+
+            session = MagicMock()
+            session.post.return_value = post_context
+
+            session_context = AsyncMock()
+            session_context.__aenter__.return_value = session
+            session_context.__aexit__.return_value = None
+            mock_session_class.return_value = session_context
 
             result = await service.generate_pdf_from_slides(
                 slides_data=slides_data,
