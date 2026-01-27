@@ -23,6 +23,8 @@ from utils.file_utils import (
 )
 from utils.parsers import parse_bool_or_none
 from utils.validators import validate_files
+from utils.dummy_functions import do_nothing_async
+import utils.error_handling as error_handling
 
 
 class TestAsyncIterator(unittest.IsolatedAsyncioTestCase):
@@ -91,3 +93,14 @@ class TestDictUtils(unittest.TestCase):
         deep_update(original, updates)
         self.assertEqual(original["a"]["c"], 2)
         self.assertTrue(has_more_than_n_keys({"a": 1, "b": 2}, 1))
+
+
+class TestDummyFunctions(unittest.IsolatedAsyncioTestCase):
+    async def test_do_nothing_async(self):
+        result = await do_nothing_async("noop")
+        self.assertIsNone(result)
+
+
+class TestErrorHandlingModule(unittest.TestCase):
+    def test_module_import(self):
+        self.assertTrue(hasattr(error_handling, "__file__"))

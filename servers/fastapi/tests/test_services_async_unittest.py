@@ -124,13 +124,13 @@ class TestWebhookService(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_request_to_webhook(self):
         subscription = MagicMock(url="http://example.com", secret=None, id="1")
-        response = AsyncMock()
-        response.__aenter__.return_value = response
-        response.__aexit__.return_value = None
-        session = AsyncMock()
+        response = MagicMock()
+        response.__aenter__ = AsyncMock(return_value=response)
+        response.__aexit__ = AsyncMock(return_value=None)
+        session = MagicMock()
         session.post.return_value = response
-        session.__aenter__.return_value = session
-        session.__aexit__.return_value = None
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
         with patch("services.webhook_service.aiohttp.ClientSession", return_value=session):
             await WebhookService.send_request_to_webhook(subscription, {})
 
