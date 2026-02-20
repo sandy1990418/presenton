@@ -11,7 +11,7 @@ from pptx.shapes.autoshape import Shape
 from pptx.slide import Slide
 from pptx.text.text import _Paragraph, TextFrame, Font, _Run
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
 from lxml.etree import fromstring, tostring
 from PIL import Image
 from pptx.oxml.xmlchemy import OxmlElement
@@ -65,6 +65,23 @@ MULTI_COLUMN_LAYOUTS: Dict[Union[str, int], int] = {
     3: 2,
     4: 3,
     5: 4,
+}
+
+# Comparison layout placeholder 映射
+# 支援兩種 comparison layout:
+# - Layout index 3: 原始 comparison
+# - Layout index 4: 兩欄 comparison (如 template_5)
+# 每欄有 title_idx 和 content_idx
+COMPARISON_LAYOUT_INDICES = {3, 4}
+COMPARISON_PLACEHOLDER_MAP = {
+    3: [
+        {"title_idx": 1, "content_idx": 2},  # 左欄
+        {"title_idx": 3, "content_idx": 4},  # 右欄
+    ],
+    4: [
+        {"title_idx": 1, "content_idx": 2},  # 左欄
+        {"title_idx": 3, "content_idx": 4},  # 右欄
+    ],
 }
 
 
@@ -362,7 +379,49 @@ class PptxPresentationCreator:
                     )
                 )
 
-            # Bullet points
+            # 處理 subPoints (comparison layout 格式)
+            # 格式: {"title": "標題", "description": "描述"}
+            sub_points = slide_data.get("subPoints", [])
+            if sub_points and layout_index in COMPARISON_LAYOUT_INDICES:
+                placeholder_map = COMPARISON_PLACEHOLDER_MAP.get(layout_index, [])
+                for col_idx, sub_point in enumerate(sub_points):
+                    if col_idx >= len(placeholder_map):
+                        break
+                    mapping = placeholder_map[col_idx]
+
+                    # 加入欄位標題
+                    if title_text := sub_point.get("title"):
+                        shapes.append(
+                            PptxTextBoxModel(
+                                position=PptxPositionModel(
+                                    left=0, top=0, width=0, height=0
+                                ),
+                                structure=PptxStructureModel(
+                                    level=0,
+                                    isList=False,
+                                    placeholder_idx=mapping["title_idx"],
+                                ),
+                                paragraphs=[PptxParagraphModel(text=title_text)],
+                            )
+                        )
+
+                    # 加入欄位描述
+                    if desc_text := sub_point.get("description"):
+                        shapes.append(
+                            PptxTextBoxModel(
+                                position=PptxPositionModel(
+                                    left=0, top=0, width=0, height=0
+                                ),
+                                structure=PptxStructureModel(
+                                    level=0,
+                                    isList=False,
+                                    placeholder_idx=mapping["content_idx"],
+                                ),
+                                paragraphs=[PptxParagraphModel(text=desc_text)],
+                            )
+                        )
+
+            # Bullet points (原有格式)
             bullets = slide_data.get("bulletPoints", [])
 
             if bullets:
@@ -509,41 +568,34 @@ class PptxPresentationCreator:
         image_layout = self._slide_image_layouts.get(slide_index)
 
         # 分類 shapes
-        title_textboxes: List[PptxTextBoxModel] = []
-        content_textboxes: List[PptxTextBoxModel] = []  # 單欄
+        placeholder_textboxes: Dict[int, List[PptxTextBoxModel]] = {}
         column_textboxes: Dict[int, List[PptxTextBoxModel]] = {}  # 多欄
         free_shapes = []
 
         for shape in slide_model.shapes:
             if isinstance(shape, PptxTextBoxModel) and shape.structure:
-                if shape.structure.placeholder_idx == TITLE_PLACEHOLDER_IDX:
-                    title_textboxes.append(shape)
-                elif shape.structure.column is not None:
+                if shape.structure.column is not None:
                     col = shape.structure.column
                     if col not in column_textboxes:
                         column_textboxes[col] = []
                     column_textboxes[col].append(shape)
                 else:
-                    content_textboxes.append(shape)
+                    ph_idx = shape.structure.placeholder_idx
+                    if ph_idx not in placeholder_textboxes:
+                        placeholder_textboxes[ph_idx] = []
+                    placeholder_textboxes[ph_idx].append(shape)
             else:
                 free_shapes.append(shape)
 
-        # 填入 title placeholder
-        if title_textboxes:
-            title_ph = self._get_placeholder(slide, TITLE_PLACEHOLDER_IDX)
-            if title_ph:
-                self._fill_placeholder(title_ph.text_frame, title_textboxes)
+        # 填入各個 placeholder
+        for ph_idx, textboxes in sorted(placeholder_textboxes.items()):
+            ph = self._get_placeholder(slide, ph_idx)
+            if ph:
+                if ph_idx != TITLE_PLACEHOLDER_IDX:
+                    self._adjust_placeholder_for_layout(ph, image_layout)
+                self._fill_placeholder(ph.text_frame, textboxes)
             else:
-                free_shapes.extend(title_textboxes)
-
-        # 填入 content placeholder（單欄）
-        if content_textboxes:
-            content_ph = self._get_placeholder(slide, CONTENT_PLACEHOLDER_IDX)
-            if content_ph:
-                self._adjust_placeholder_for_layout(content_ph, image_layout)
-                self._fill_placeholder(content_ph.text_frame, content_textboxes)
-            else:
-                free_shapes.extend(content_textboxes)
+                free_shapes.extend(textboxes)
 
         # 處理多欄
         if column_textboxes:
@@ -566,6 +618,7 @@ class PptxPresentationCreator:
         self, text_frame: TextFrame, textboxes: List[PptxTextBoxModel]
     ):
         """Populate a placeholder text frame while preserving template bullet styles."""
+        text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         first_para = True
 
         for textbox in textboxes:
@@ -711,6 +764,7 @@ class PptxPresentationCreator:
             )
             tf = shape.text_frame
             tf.word_wrap = True
+            tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
             # 填入內容
             first_para = True
@@ -931,12 +985,17 @@ class PptxPresentationCreator:
     # ==================== Style Helpers ====================
 
     def _apply_font(self, font: Font, model: PptxFontModel):
-        """Apply font styling to a text element."""
-        font.name = model.name
-        font.size = Pt(model.size)
-        font.color.rgb = RGBColor.from_string(model.color)
-        font.italic = model.italic
-        font.bold = model.font_weight >= 600
+        """Apply font styling to a text element. Only sets properties that are not None."""
+        if model.name is not None:
+            font.name = model.name
+        if model.size is not None:
+            font.size = Pt(model.size)
+        if model.color is not None:
+            font.color.rgb = RGBColor.from_string(model.color)
+        if model.italic:
+            font.italic = model.italic
+        if model.font_weight is not None:
+            font.bold = model.font_weight >= 600
 
         if model.underline is not None:
             font.underline = bool(model.underline)
