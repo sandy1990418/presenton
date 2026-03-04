@@ -19,14 +19,18 @@ def get_system_prompt(
     include_title_slide: bool = True,
     has_chunks: bool = False,
 ):
-    chunk_instructions = """
+    chunk_instructions = (
+        """
         - **SOURCE CHUNKS**: You have been provided with numbered source chunks. Each slide MUST include `chunk_refs` - a list of chunk IDs that are relevant to that slide's content.
         - For each slide, identify which chunks contain information relevant to that slide's topic.
         - A slide may reference multiple chunks (e.g., [0, 2, 5]) or just one chunk (e.g., [1]).
         - Title slides or conclusion slides may have empty chunk_refs ([]) if they don't need source data.
         - **IMPORTANT**: Only reference chunks that are DIRECTLY relevant to the slide content. Don't include all chunks for every slide.
-    """ if has_chunks else ""
-    
+    """
+        if has_chunks
+        else ""
+    )
+
     return f"""
         You are an expert presentation creator. Generate structured presentations based on user requirements and format them according to the specified JSON schema with markdown content.
 
@@ -60,28 +64,79 @@ def get_system_prompt(
     """
 
 
-def format_chunks_for_prompt(chunks: List[dict]) -> str:
-    """Format chunks for inclusion in the prompt."""
+def format_chunks_for_prompt(
+    chunks: List[dict],
+    max_total_chars: int = 80000,
+) -> str:
+    """Format chunks for inclusion in the prompt with a budget limit.
+
+    When the total output would exceed *max_total_chars*, earlier chunks
+    get full detail (summary + content preview) while later chunks are
+    rendered in a compact summary-only format so the LLM can still
+    assign ``chunk_refs`` without blowing the context window.
+    """
     if not chunks:
         return ""
-    
-    result = "\n## Source Document Chunks\n"
-    result += "The following chunks contain source information. Reference them by ID in your slide's chunk_refs field.\n\n"
-    
+
+    header = (
+        "\n## Source Document Chunks\n"
+        "The following chunks contain source information. "
+        "Reference them by ID in your slide's chunk_refs field.\n\n"
+    )
+    result = header
+    budget = max_total_chars - len(header)
+
+    full_entries: list[str] = []
+    compact_entries: list[str] = []
+    used = 0
+    switched_to_compact = False
+
     for chunk in chunks:
         chunk_id = chunk.get("id", 0)
         title = chunk.get("title", f"Chunk {chunk_id}")
         summary = chunk.get("summary", "")
-        # Include first part of content for context
-        content_preview = chunk.get("content", "")[:300]
-        if len(chunk.get("content", "")) > 300:
-            content_preview += "..."
-        
-        result += f"### [CHUNK {chunk_id}] {title}\n"
+
+        if not switched_to_compact:
+            # Build full entry with content preview
+            content_preview = chunk.get("content", "")[:300]
+            if len(chunk.get("content", "")) > 300:
+                content_preview += "..."
+
+            entry = f"### [CHUNK {chunk_id}] {title}\n"
+            if summary:
+                entry += f"Summary: {summary}\n"
+            entry += f"Content: {content_preview}\n\n"
+
+            if used + len(entry) > budget:
+                switched_to_compact = True
+            else:
+                full_entries.append(entry)
+                used += len(entry)
+                continue
+
+        # Compact: summary only, one line
+        compact = f"- [CHUNK {chunk_id}] {title}"
         if summary:
-            result += f"Summary: {summary}\n"
-        result += f"Content: {content_preview}\n\n"
-    
+            compact += f" — {summary}"
+        compact += "\n"
+
+        if used + len(compact) > budget:
+            # Hard stop – add a note about omitted chunks
+            remaining = len(chunks) - (len(full_entries) + len(compact_entries))
+            compact_entries.append(
+                f"\n({remaining} more chunks omitted — "
+                f"IDs {chunk_id}–{chunks[-1].get('id', '?')})\n"
+            )
+            break
+
+        compact_entries.append(compact)
+        used += len(compact)
+
+    result += "".join(full_entries)
+    if compact_entries:
+        result += "\n### Additional chunks (summary only)\n"
+        result += "".join(compact_entries)
+
     return result
 
 
@@ -93,19 +148,25 @@ def get_user_prompt(
     chunks: Optional[List[dict]] = None,
 ):
     chunks_section = format_chunks_for_prompt(chunks) if chunks else ""
-    
+
+    # When chunks are available the source information is already
+    # represented in chunks_section – injecting the raw
+    # additional_context would blow the context window for large
+    # document sets.  Only include it when there are no chunks.
+    additional_info = additional_context if (additional_context and not chunks) else ""
+
     return f"""
         **Input:**
         - User provided content: {content or "Create presentation"}
         - Output Language: {language}
         - Number of Slides: {n_slides}
         - Current Date and Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-        - Additional Information: {additional_context or ""}
+        - Additional Information: {additional_info}
         {chunks_section}
-        
+
         **Important Note on Multiple Documents:**
         If multiple documents are provided above, they should be treated as complementary sources for a single, unified presentation. Create slides that synthesize insights across all documents, identify common themes, compare/contrast findings, and build a coherent narrative that leverages the full breadth of information available.
-        
+
         {"**Important: For each slide, include chunk_refs listing the IDs of source chunks that are relevant to that slide's content.**" if chunks else ""}
     """
 
@@ -129,7 +190,9 @@ def get_messages(
             ),
         ),
         LLMUserMessage(
-            content=get_user_prompt(content, n_slides, language, additional_context, chunks),
+            content=get_user_prompt(
+                content, n_slides, language, additional_context, chunks
+            ),
         ),
     ]
 
@@ -148,7 +211,7 @@ async def generate_ppt_outline(
 ):
     """
     Generate presentation outlines.
-    
+
     Args:
         content: Main presentation topic/content
         n_slides: Number of slides to generate
@@ -167,7 +230,9 @@ async def generate_ppt_outline(
 
     # Choose appropriate response model based on whether chunks are provided
     if chunks:
-        response_model = get_presentation_outline_model_with_chunks(n_slides, len(chunks))
+        response_model = get_presentation_outline_model_with_chunks(
+            n_slides, len(chunks)
+        )
     else:
         response_model = get_presentation_outline_model_with_n_slides(n_slides)
 
