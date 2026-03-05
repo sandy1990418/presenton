@@ -33,10 +33,10 @@ from models.stateless_models import (
     StatelessGenerationContext,
     StatelessOutlineResponse,
 )
-from services.document_chunker import DocumentChunker, format_chunk_content_for_slide
-from services.documents_loader import DocumentsLoader
+from services.document_chunker import format_chunk_content_for_slide
 from services.image_generation_service import ImageGenerationService
 from services.pptx_presentation_creator import PptxPresentationCreator
+from services.source_context_service import SourceContextService
 from services.temp_file_service import TEMP_FILE_SERVICE
 from utils.get_layout_by_name import get_layout_by_name
 from utils.llm_calls.generate_presentation_outlines import generate_ppt_outline
@@ -74,6 +74,22 @@ class StatelessSlideData:
 class StatelessPptxService:
     """Service for stateless PPTX generation."""
 
+    _SOURCE_CONTEXT_CONFIG_KEYS = {
+        "_source_chunk_concurrency",
+        "_max_source_files",
+        "_max_parse_files",
+        "_max_parse_total_bytes",
+        "_max_source_chars_per_doc",
+        "_max_source_total_chars",
+        "_max_chunks_per_doc",
+        "_max_total_chunks",
+        "_max_outline_prompt_chunks",
+        "_max_chunk_refs_per_slide",
+        "_large_file_bytes_threshold",
+        "_large_doc_chars_threshold",
+        "_enable_llm_chunk_summary",
+    }
+
     def __init__(self, temp_dir: Optional[str] = None):
         """
         Initialize the service.
@@ -83,101 +99,45 @@ class StatelessPptxService:
         """
         self._temp_dir = temp_dir or TEMP_FILE_SERVICE.create_temp_dir()
         self._image_service = ImageGenerationService(self._temp_dir)
-        self._source_chunk_concurrency = int(
-            os.getenv("STATELESS_SOURCE_CHUNK_CONCURRENCY", "4")
-        )
-        self._max_source_files = int(os.getenv("STATELESS_SOURCE_MAX_FILES", "20"))
+        self._source_context_service = SourceContextService()
 
-    @staticmethod
-    def _has_meaningful_text(doc: Optional[str], sample_size: int = 256) -> bool:
-        """Fast non-empty check to avoid full-string strip on large files."""
-        if not doc:
-            return False
-        head = doc[:sample_size]
-        tail = doc[-sample_size:] if len(doc) > sample_size else ""
-        return bool(head.strip() or tail.strip())
+    def __getattr__(self, name: str):
+        if name in self._SOURCE_CONTEXT_CONFIG_KEYS:
+            return getattr(self._source_context_service, name)
+        raise AttributeError(f"{self.__class__.__name__!s} has no attribute {name!s}")
+
+    def __setattr__(self, name: str, value):
+        if (
+            name in self._SOURCE_CONTEXT_CONFIG_KEYS
+            and "_source_context_service" in self.__dict__
+        ):
+            setattr(self._source_context_service, name, value)
+            return
+        super().__setattr__(name, value)
 
     async def _prepare_source_context(
         self,
         files: Optional[List[str]],
         query: Optional[str] = None,
     ) -> tuple[str, Optional[List[SourceChunk]], Optional[str], Optional[List[dict]]]:
-        additional_context = ""
-        source_chunks: Optional[List[SourceChunk]] = None
-        source_summary: Optional[str] = None
-        chunks_for_prompt: Optional[List[dict]] = None
+        return await self._source_context_service._prepare_source_context(files, query)
 
-        if not files:
-            return additional_context, source_chunks, source_summary, chunks_for_prompt
-        if len(files) > self._max_source_files:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Maximum {self._max_source_files} files are supported per request.",
-            )
+    def _remap_prompt_chunk_refs(
+        self,
+        outlines: PresentationOutlineModel,
+        prompt_chunks: List[dict],
+    ) -> None:
+        self._source_context_service._remap_prompt_chunk_refs(outlines, prompt_chunks)
 
-        documents_loader = DocumentsLoader(file_paths=files)
-        await documents_loader.load_documents()
-        documents = [
-            doc for doc in documents_loader.documents if self._has_meaningful_text(doc)
-        ]
-        if not documents:
-            return additional_context, source_chunks, source_summary, chunks_for_prompt
-
-        semaphore = asyncio.Semaphore(self._source_chunk_concurrency)
-
-        async def chunk_one_document(document_text: str, document_id: int):
-            async with semaphore:
-                chunker = DocumentChunker()
-                chunks = await chunker.chunk_documents(
-                    document_text,
-                    generate_summaries=True,
-                    document_id=document_id,
-                )
-                if not chunks and self._has_meaningful_text(document_text):
-                    fallback_chunker = DocumentChunker(min_chunk_size=1)
-                    chunks = await fallback_chunker.chunk_documents(
-                        document_text,
-                        generate_summaries=True,
-                        document_id=document_id,
-                    )
-                return chunks
-
-        chunk_results = await asyncio.gather(
-            *[
-                chunk_one_document(document_text, document_id)
-                for document_id, document_text in enumerate(documents)
-            ]
+    def _assign_chunk_refs_to_outlines(
+        self,
+        outlines: PresentationOutlineModel,
+        source_chunks: Optional[List[SourceChunk]],
+        query: Optional[str],
+    ) -> None:
+        self._source_context_service._assign_chunk_refs_to_outlines(
+            outlines, source_chunks, query
         )
-
-        chunks = []
-        global_chunk_id = 0
-        for document_chunks in chunk_results:
-            for chunk in document_chunks:
-                chunk.id = global_chunk_id
-                global_chunk_id += 1
-                chunks.append(chunk)
-
-        if chunks:
-            source_chunks = [SourceChunk(**chunk.to_dict()) for chunk in chunks]
-            chunks_for_prompt = [chunk.to_dict() for chunk in chunks]
-            summary_lines: List[str] = []
-            total_summary_chars = 0
-            for chunk in chunks:
-                if not chunk.summary:
-                    continue
-                summary_line = f"- {chunk.summary}"
-                if total_summary_chars + len(summary_line) > 2000:
-                    summary_lines.append("...")
-                    break
-                summary_lines.append(summary_line)
-                total_summary_chars += len(summary_line)
-            if summary_lines:
-                source_summary = "\n".join(summary_lines)
-        else:
-            # Only build raw context when chunking fails.
-            additional_context = "\n\n---\n\n".join(documents)
-
-        return additional_context, source_chunks, source_summary, chunks_for_prompt
 
     async def generate_outlines(
         self,
@@ -217,7 +177,7 @@ class StatelessPptxService:
             source_chunks,
             source_summary,
             chunks_for_prompt,
-        ) = await self._prepare_source_context(files)
+        ) = await self._prepare_source_context(files, query=content)
 
         # Calculate slides to generate (accounting for TOC)
         n_slides_to_generate = n_slides
@@ -287,6 +247,15 @@ class StatelessPptxService:
                         content=toc_outline,
                     ),
                 )
+
+        # Prompt chunks use local IDs for schema validation; map them back.
+        self._remap_prompt_chunk_refs(presentation_outlines, chunks_for_prompt or [])
+        # Backfill empty/invalid refs to reduce [] responses.
+        self._assign_chunk_refs_to_outlines(
+            presentation_outlines,
+            source_chunks,
+            query=content,
+        )
         title = get_presentation_title_from_outlines(presentation_outlines)
 
         return StatelessOutlineResponse(
