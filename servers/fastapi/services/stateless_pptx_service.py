@@ -83,10 +83,24 @@ class StatelessPptxService:
         """
         self._temp_dir = temp_dir or TEMP_FILE_SERVICE.create_temp_dir()
         self._image_service = ImageGenerationService(self._temp_dir)
+        self._source_chunk_concurrency = int(
+            os.getenv("STATELESS_SOURCE_CHUNK_CONCURRENCY", "4")
+        )
+        self._max_source_files = int(os.getenv("STATELESS_SOURCE_MAX_FILES", "20"))
+
+    @staticmethod
+    def _has_meaningful_text(doc: Optional[str], sample_size: int = 256) -> bool:
+        """Fast non-empty check to avoid full-string strip on large files."""
+        if not doc:
+            return False
+        head = doc[:sample_size]
+        tail = doc[-sample_size:] if len(doc) > sample_size else ""
+        return bool(head.strip() or tail.strip())
 
     async def _prepare_source_context(
         self,
         files: Optional[List[str]],
+        query: Optional[str] = None,
     ) -> tuple[str, Optional[List[SourceChunk]], Optional[str], Optional[List[dict]]]:
         additional_context = ""
         source_chunks: Optional[List[SourceChunk]] = None
@@ -95,31 +109,73 @@ class StatelessPptxService:
 
         if not files:
             return additional_context, source_chunks, source_summary, chunks_for_prompt
+        if len(files) > self._max_source_files:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum {self._max_source_files} files are supported per request.",
+            )
 
         documents_loader = DocumentsLoader(file_paths=files)
         await documents_loader.load_documents()
-        documents = [doc for doc in documents_loader.documents if doc and doc.strip()]
+        documents = [
+            doc for doc in documents_loader.documents if self._has_meaningful_text(doc)
+        ]
         if not documents:
             return additional_context, source_chunks, source_summary, chunks_for_prompt
 
-        additional_context = "\n\n---\n\n".join(documents)
+        semaphore = asyncio.Semaphore(self._source_chunk_concurrency)
 
-        chunker = DocumentChunker()
-        chunks = await chunker.chunk_documents(additional_context, generate_summaries=True)
-        if not chunks and additional_context.strip():
-            fallback_chunker = DocumentChunker(min_chunk_size=1)
-            chunks = await fallback_chunker.chunk_documents(
-                additional_context, generate_summaries=True
-            )
+        async def chunk_one_document(document_text: str, document_id: int):
+            async with semaphore:
+                chunker = DocumentChunker()
+                chunks = await chunker.chunk_documents(
+                    document_text,
+                    generate_summaries=True,
+                    document_id=document_id,
+                )
+                if not chunks and self._has_meaningful_text(document_text):
+                    fallback_chunker = DocumentChunker(min_chunk_size=1)
+                    chunks = await fallback_chunker.chunk_documents(
+                        document_text,
+                        generate_summaries=True,
+                        document_id=document_id,
+                    )
+                return chunks
+
+        chunk_results = await asyncio.gather(
+            *[
+                chunk_one_document(document_text, document_id)
+                for document_id, document_text in enumerate(documents)
+            ]
+        )
+
+        chunks = []
+        global_chunk_id = 0
+        for document_chunks in chunk_results:
+            for chunk in document_chunks:
+                chunk.id = global_chunk_id
+                global_chunk_id += 1
+                chunks.append(chunk)
 
         if chunks:
             source_chunks = [SourceChunk(**chunk.to_dict()) for chunk in chunks]
             chunks_for_prompt = [chunk.to_dict() for chunk in chunks]
-            summaries = [chunk.summary for chunk in chunks if chunk.summary]
-            if summaries:
-                source_summary = "\n".join(f"- {summary}" for summary in summaries)
-                if len(source_summary) > 2000:
-                    source_summary = source_summary[:1997] + "..."
+            summary_lines: List[str] = []
+            total_summary_chars = 0
+            for chunk in chunks:
+                if not chunk.summary:
+                    continue
+                summary_line = f"- {chunk.summary}"
+                if total_summary_chars + len(summary_line) > 2000:
+                    summary_lines.append("...")
+                    break
+                summary_lines.append(summary_line)
+                total_summary_chars += len(summary_line)
+            if summary_lines:
+                source_summary = "\n".join(summary_lines)
+        else:
+            # Only build raw context when chunking fails.
+            additional_context = "\n\n---\n\n".join(documents)
 
         return additional_context, source_chunks, source_summary, chunks_for_prompt
 

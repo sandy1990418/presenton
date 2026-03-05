@@ -68,76 +68,37 @@ def format_chunks_for_prompt(
     chunks: List[dict],
     max_total_chars: int = 80000,
 ) -> str:
-    """Format chunks for inclusion in the prompt with a budget limit.
-
-    When the total output would exceed *max_total_chars*, earlier chunks
-    get full detail (summary + content preview) while later chunks are
-    rendered in a compact summary-only format so the LLM can still
-    assign ``chunk_refs`` without blowing the context window.
-    """
+    """Format chunk metadata for outline prompts within a hard char budget."""
     if not chunks:
         return ""
 
     header = (
         "\n## Source Document Chunks\n"
-        "The following chunks contain source information. "
-        "Reference them by ID in your slide's chunk_refs field.\n\n"
+        "Reference relevant chunk IDs in each slide's chunk_refs field.\n\n"
     )
-    result = header
-    budget = max_total_chars - len(header)
+    lines: List[str] = [header]
+    used = len(header)
 
-    full_entries: list[str] = []
-    compact_entries: list[str] = []
-    used = 0
-    switched_to_compact = False
-
-    for chunk in chunks:
+    for index, chunk in enumerate(chunks):
         chunk_id = chunk.get("id", 0)
+        document_id = chunk.get("document_id", 0)
         title = chunk.get("title", f"Chunk {chunk_id}")
         summary = chunk.get("summary", "")
 
-        if not switched_to_compact:
-            # Build full entry with content preview
-            content_preview = chunk.get("content", "")[:300]
-            if len(chunk.get("content", "")) > 300:
-                content_preview += "..."
-
-            entry = f"### [CHUNK {chunk_id}] {title}\n"
-            if summary:
-                entry += f"Summary: {summary}\n"
-            entry += f"Content: {content_preview}\n\n"
-
-            if used + len(entry) > budget:
-                switched_to_compact = True
-            else:
-                full_entries.append(entry)
-                used += len(entry)
-                continue
-
-        # Compact: summary only, one line
-        compact = f"- [CHUNK {chunk_id}] {title}"
+        line = f"[CHUNK {chunk_id}] (DOC {document_id}) {title}"
         if summary:
-            compact += f" — {summary}"
-        compact += "\n"
+            line += f" | Summary: {summary}"
+        line += "\n"
 
-        if used + len(compact) > budget:
-            # Hard stop – add a note about omitted chunks
-            remaining = len(chunks) - (len(full_entries) + len(compact_entries))
-            compact_entries.append(
-                f"\n({remaining} more chunks omitted — "
-                f"IDs {chunk_id}–{chunks[-1].get('id', '?')})\n"
-            )
+        if used + len(line) > max_total_chars:
+            remaining = len(chunks) - index
+            lines.append(f"\n({remaining} more chunks omitted)\n")
             break
 
-        compact_entries.append(compact)
-        used += len(compact)
+        lines.append(line)
+        used += len(line)
 
-    result += "".join(full_entries)
-    if compact_entries:
-        result += "\n### Additional chunks (summary only)\n"
-        result += "".join(compact_entries)
-
-    return result
+    return "".join(lines)
 
 
 def get_user_prompt(

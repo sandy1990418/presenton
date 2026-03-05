@@ -9,7 +9,7 @@ generation to reference only relevant chunks.
 import logging
 import re
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from models.llm_message import LLMSystemMessage, LLMUserMessage
 from services.llm_client import LLMClient
@@ -26,6 +26,7 @@ class DocumentChunk:
     title: str  # Short title/topic for this chunk
     summary: str  # Brief summary of the chunk content
     content: str  # Original content
+    document_id: int = 0  # Source document index in multi-file uploads
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -51,10 +52,31 @@ class DocumentChunker:
         self.min_chunk_size = min_chunk_size
         self.overlap = overlap
 
+    def _get_adaptive_chunk_size(self, text_length: int) -> int:
+        """Scale chunk size by document length to avoid chunk explosion."""
+        if text_length > 5_000_000:
+            return 8000
+        if text_length > 1_000_000:
+            return 5000
+        if text_length > 200_000:
+            return 3000
+        return self.max_chunk_size
+
+    def _has_meaningful_text(self, text: str, sample_size: int = 256) -> bool:
+        """Fast non-empty check without scanning/copying full large strings."""
+        if not text:
+            return False
+        head = text[:sample_size]
+        tail = text[-sample_size:] if len(text) > sample_size else ""
+        return bool(head.strip() or tail.strip())
+
     async def chunk_documents(
         self,
         documents: str,
         generate_summaries: bool = True,
+        llm_summary_char_threshold: int = 100_000,
+        document_id: int = 0,
+        merge_small_min_size: Optional[int] = None,
     ) -> List[DocumentChunk]:
         """
         Split documents into chunks.
@@ -62,19 +84,37 @@ class DocumentChunker:
         Args:
             documents: Raw document content
             generate_summaries: Whether to generate LLM summaries for chunks
+            llm_summary_char_threshold: Skip LLM summaries when document is larger than
+                this size and use extractive summaries instead.
+            document_id: Source document index for multi-file uploads.
+            merge_small_min_size: Merge tiny adjacent chunks below this size.
 
         Returns:
             List of DocumentChunk objects
         """
-        if not documents or len(documents.strip()) < self.min_chunk_size:
+        if not self._has_meaningful_text(documents):
             return []
 
-        # Try structured chunking first (by headers)
-        chunks = self._chunk_by_headers(documents)
+        adaptive_chunk_size = self._get_adaptive_chunk_size(len(documents))
+        original_max_chunk_size = self.max_chunk_size
+        self.max_chunk_size = adaptive_chunk_size
 
-        # Fall back to paragraph-based chunking
-        if not chunks or len(chunks) == 1:
-            chunks = self._chunk_by_paragraphs(documents)
+        # Try structured chunking first (by headers)
+        try:
+            chunks = self._chunk_by_headers(documents)
+
+            # Fall back to paragraph-based chunking
+            if not chunks or len(chunks) == 1:
+                chunks = self._chunk_by_paragraphs(documents)
+        finally:
+            self.max_chunk_size = original_max_chunk_size
+
+        merge_target = (
+            merge_small_min_size
+            if merge_small_min_size is not None
+            else max(self.min_chunk_size, adaptive_chunk_size // 2)
+        )
+        chunks = self._merge_small_chunks(chunks, min_size=merge_target)
 
         # Create DocumentChunk objects
         result = []
@@ -84,12 +124,17 @@ class DocumentChunker:
                 title=title,
                 summary="",  # Will be filled if generate_summaries=True
                 content=content.strip(),
+                document_id=document_id,
             )
             result.append(chunk)
 
         # Generate summaries if requested
         if generate_summaries and result:
-            result = await self._generate_chunk_summaries(result)
+            if len(documents) > llm_summary_char_threshold:
+                for chunk in result:
+                    chunk.summary = self._extract_summary(chunk.content)
+            else:
+                result = await self._generate_chunk_summaries(result)
 
         return result
 
@@ -103,6 +148,11 @@ class DocumentChunker:
 
         # Also match common patterns like "Section 1:" or "1. Title"
         section_pattern = r"^(?:Section\s+\d+[:.]\s*|(?:\d+\.)+\s+)(.+?)$"
+        # Match CJK section titles like "第一章", "一、", "（一）"
+        cjk_section_pattern = (
+            r"^(?:第[一二三四五六七八九十百\d]+[章节節部分编篇]|"
+            r"[一二三四五六七八九十百\d]+[、．.])\s*(.+?)$"
+        )
 
         lines = text.split("\n")
         chunks = []
@@ -115,8 +165,9 @@ class DocumentChunker:
             section_match = re.match(
                 section_pattern, line, re.MULTILINE | re.IGNORECASE
             )
+            cjk_section_match = re.match(cjk_section_pattern, line, re.MULTILINE)
 
-            if header_match or section_match:
+            if header_match or section_match or cjk_section_match:
                 # Save previous chunk if it has content
                 if current_content:
                     content = "\n".join(current_content).strip()
@@ -128,9 +179,12 @@ class DocumentChunker:
                         chunks[-1] = (prev_title, prev_content + "\n\n" + content)
 
                 # Start new chunk
-                current_title = (
-                    header_match.group(2) if header_match else section_match.group(1)
-                )
+                if header_match:
+                    current_title = header_match.group(2)
+                elif section_match:
+                    current_title = section_match.group(1)
+                else:
+                    current_title = cjk_section_match.group(1)
                 current_content = []
             else:
                 current_content.append(line)
@@ -158,52 +212,53 @@ class DocumentChunker:
 
     def _chunk_by_paragraphs(self, text: str) -> List[tuple]:
         """
-        Split by paragraphs, grouping them to meet size requirements.
+        Fallback chunking by character window (Unicode-safe).
+        This is faster and more robust for very large multilingual documents.
         """
-        # Split by double newlines (paragraph breaks)
-        paragraphs = re.split(r"\n\s*\n", text)
-        paragraphs = [p.strip() for p in paragraphs if p.strip()]
-
-        if not paragraphs:
+        if not text:
             return []
 
         chunks = []
-        current_content = []
-        current_length = 0
         chunk_index = 1
+        step = max(1, self.max_chunk_size - self.overlap)
 
-        for para in paragraphs:
-            para_length = len(para)
-
-            # If adding this paragraph exceeds max, save current chunk
-            if current_length + para_length > self.max_chunk_size and current_content:
-                content = "\n\n".join(current_content)
+        for start in range(0, len(text), step):
+            content = text[start : start + self.max_chunk_size]
+            normalized = content.strip()
+            if not normalized:
+                continue
+            if len(normalized) >= self.min_chunk_size:
                 chunks.append((f"Section {chunk_index}", content))
                 chunk_index += 1
-
-                # Start new chunk with overlap
-                if self.overlap > 0 and current_content:
-                    # Keep last paragraph as overlap
-                    current_content = [current_content[-1]]
-                    current_length = len(current_content[0])
-                else:
-                    current_content = []
-                    current_length = 0
-
-            current_content.append(para)
-            current_length += para_length
-
-        # Save final chunk
-        if current_content:
-            content = "\n\n".join(current_content)
-            if len(content) >= self.min_chunk_size:
-                chunks.append((f"Section {chunk_index}", content))
             elif chunks:
                 # Merge with previous
                 prev_title, prev_content = chunks[-1]
                 chunks[-1] = (prev_title, prev_content + "\n\n" + content)
 
         return chunks
+
+    def _merge_small_chunks(self, chunks: List[tuple], min_size: int) -> List[tuple]:
+        """Merge adjacent tiny chunks to improve slide-generation context quality."""
+        if not chunks:
+            return chunks
+
+        merged: List[tuple] = []
+        pending_title, pending_content = chunks[0]
+
+        for title, content in chunks[1:]:
+            if len(pending_content) < min_size:
+                pending_content = f"{pending_content}\n\n{content}"
+                continue
+            merged.append((pending_title, pending_content))
+            pending_title, pending_content = title, content
+
+        if merged and len(pending_content) < min_size:
+            prev_title, prev_content = merged[-1]
+            merged[-1] = (prev_title, f"{prev_content}\n\n{pending_content}")
+        else:
+            merged.append((pending_title, pending_content))
+
+        return merged
 
     def _split_large_chunk(self, title: str, content: str) -> List[tuple]:
         """Split a large chunk into smaller pieces."""
@@ -246,7 +301,7 @@ class DocumentChunker:
 
         if len(chunks) <= 3:
             for chunk in chunks:
-                chunk.summary = self._extract_first_sentence(chunk.content)
+                chunk.summary = self._extract_summary(chunk.content)
             return chunks
 
         client = LLMClient()
@@ -260,6 +315,8 @@ class DocumentChunker:
             "CHUNK <id>: <summary>\n\n"
             "Be concise but capture the essential facts and data."
         )
+
+        chunks_by_id: Dict[int, DocumentChunk] = {chunk.id: chunk for chunk in chunks}
 
         # Process chunks in batches
         for batch_start in range(0, len(chunks), batch_size):
@@ -295,8 +352,9 @@ class DocumentChunker:
                         if match:
                             chunk_id = int(match.group(1))
                             summary = match.group(2).strip()
-                            if 0 <= chunk_id < len(chunks):
-                                chunks[chunk_id].summary = summary
+                            chunk = chunks_by_id.get(chunk_id)
+                            if chunk is not None:
+                                chunk.summary = summary
 
             except Exception:
                 logger.exception("Failed to generate chunk summaries for batch")
@@ -304,18 +362,24 @@ class DocumentChunker:
         # Fill in any missing summaries with extractive fallback
         for chunk in chunks:
             if not chunk.summary:
-                chunk.summary = self._extract_first_sentence(chunk.content)
+                chunk.summary = self._extract_summary(chunk.content)
 
         return chunks
 
-    def _extract_first_sentence(self, text: str) -> str:
-        """Extract first sentence as a simple summary."""
-        # Find first sentence ending
-        match = re.match(r"^(.+?[.!?])\s", text)
+    def _extract_summary(self, text: str) -> str:
+        """Extractive summary that supports both Latin and CJK punctuation."""
+        match = re.match(r"^(.+?[.!?。！？])\s*", text.strip())
         if match:
-            return match.group(1)
-        # If no sentence ending, take first 100 chars
-        return text[:100].strip() + "..." if len(text) > 100 else text
+            first_sentence = match.group(1)
+            if len(text) < 500:
+                return first_sentence
+            tail = text[-60:].strip()
+            return f"{first_sentence} ... {tail}"
+        return text[:200].strip() + ("..." if len(text) > 200 else "")
+
+    def _extract_first_sentence(self, text: str) -> str:
+        """Backward-compatible wrapper."""
+        return self._extract_summary(text)
 
 
 def format_chunks_for_prompt(chunks: List[DocumentChunk]) -> str:
