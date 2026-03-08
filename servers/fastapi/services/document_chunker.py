@@ -391,44 +391,76 @@ def format_chunks_for_prompt(chunks: List[DocumentChunk]) -> str:
     return result
 
 
+def _chunk_field(chunk: Any, field: str, default: str = "") -> str:
+    """Read a field from a chunk dict or object."""
+    if isinstance(chunk, dict):
+        return chunk.get(field, default)
+    return getattr(chunk, field, default)
+
+
 def format_chunk_content_for_slide(
-    chunks: List[dict],
+    chunks: List,
     chunk_refs: List[int],
+    max_chars: int = 0,
 ) -> str:
     """
-    Format specific chunk contents for slide generation.
+    Format referenced chunk contents for a single slide's LLM prompt.
+
+    Uses a graceful degradation strategy when the total exceeds
+    *max_chars* (0 = unlimited):
+
+    1. **full** — every chunk uses its raw ``content``.
+    2. **mixed** — the first chunk (highest relevance, since
+       ``chunk_refs`` is ordered) keeps ``content``; the rest use
+       ``summary``.
+    3. **summary** — all chunks use ``summary`` only.
+    4. **truncate** — summary output is hard-truncated.
 
     Args:
-        chunks: All available chunks (as dicts with 'id', 'title', 'content' keys)
-        chunk_refs: List of chunk IDs to include
-
-    Returns:
-        Formatted string with referenced chunk contents
+        chunks: Available chunks (dicts or SourceChunk objects).
+        chunk_refs: Chunk IDs to include, ordered by relevance.
+        max_chars: Character budget. 0 means unlimited.
     """
     if not chunk_refs:
         return ""
 
-    # Build an ID-based lookup so chunk_refs are matched by ID,
-    # not by list position.
     def _get_id(chunk: Any) -> int:
         return chunk.get("id", -1) if isinstance(chunk, dict) else chunk.id
 
     chunks_by_id: Dict[int, Any] = {_get_id(c): c for c in chunks}
+    resolved = [chunks_by_id[r] for r in chunk_refs if r in chunks_by_id]
+    if not resolved:
+        return ""
 
-    result = "## Source Reference Context\n\n"
-    result += "Use the following source content as authoritative reference:\n\n"
+    header = (
+        "## Source Reference Context\n\n"
+        "Use the following source content as authoritative reference:\n\n"
+    )
 
-    for ref_id in chunk_refs:
-        chunk = chunks_by_id.get(ref_id)
-        if chunk is None:
-            continue
-        title = (
-            chunk.get("title", f"Chunk {ref_id}")
-            if isinstance(chunk, dict)
-            else chunk.title
-        )
-        content = chunk.get("content", "") if isinstance(chunk, dict) else chunk.content
-        result += f"### {title}\n"
-        result += f"{content}\n\n"
+    def _build(mode: str) -> str:
+        parts = [header]
+        for i, chunk in enumerate(resolved):
+            title = _chunk_field(chunk, "title", f"Chunk {chunk_refs[i]}")
+            if mode == "full" or (mode == "mixed" and i == 0):
+                body = _chunk_field(chunk, "content")
+            else:
+                body = _chunk_field(chunk, "summary")
+                if not body:
+                    # summary missing — use a truncated content preview
+                    body = _chunk_field(chunk, "content")[:300]
+            parts.append(f"### {title}\n{body}\n")
+        return "\n".join(parts)
 
-    return result
+    # No budget constraint — always return full content
+    if max_chars <= 0:
+        return _build("full")
+
+    # Try strategies in decreasing quality order
+    for mode in ("full", "mixed", "summary"):
+        result = _build(mode)
+        if len(result) <= max_chars:
+            return result
+
+    # Last resort — hard-truncate the summary version
+    result = _build("summary")
+    return result[: max_chars - 3] + "..."

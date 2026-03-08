@@ -156,7 +156,6 @@ async def stream_generate_from_outline(
     verbosity = request.get_verbosity()
     instructions = request.get_instructions()
     source_summary = request.get_source_summary()
-    source_chunks = request.get_source_chunks()
 
     task_id = STATELESS_TASK_STORE.create_task_id()
     progress_queue, progress_callback = _create_progress_queue()
@@ -174,7 +173,8 @@ async def stream_generate_from_outline(
                 instructions=instructions,
                 title=request.title,
                 source_summary=source_summary,
-                source_chunks=source_chunks,
+                source_chunks=request.get_source_chunks(),
+                source_context_id=request.get_source_context_id(),
                 progress_callback=progress_callback,
             )
         )

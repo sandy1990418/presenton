@@ -6,6 +6,7 @@ the main service stays orchestration-focused.
 """
 
 import asyncio
+import logging
 import os
 import re
 from collections import defaultdict
@@ -17,6 +18,15 @@ from models.presentation_outline_model import PresentationOutlineModel
 from models.stateless_models import SourceChunk
 from services.document_chunker import DocumentChunker
 from services.documents_loader import DocumentsLoader
+
+logger = logging.getLogger(__name__)
+
+# Global semaphore shared across all requests to limit concurrent file
+# parsing operations (CPU/memory-heavy).  Prevents resource exhaustion
+# when multiple users upload large files simultaneously.
+_GLOBAL_PARSE_SEMAPHORE = asyncio.Semaphore(
+    int(os.getenv("STATELESS_GLOBAL_PARSE_CONCURRENCY", "4"))
+)
 
 
 class SourceContextService:
@@ -128,7 +138,9 @@ class SourceContextService:
             start = min(i * step, max_start)
             end = start + window_size
             segment = text[start:end]
-            windows.append(f"[SEGMENT {i + 1}/{target_windows} @ {start}:{end}]\n{segment}")
+            windows.append(
+                f"[SEGMENT {i + 1}/{target_windows} @ {start}:{end}]\n{segment}"
+            )
 
         compressed = "\n\n".join(windows)
         if len(compressed) > max_chars:
@@ -157,6 +169,44 @@ class SourceContextService:
         step = (len(chunks) - 1) / (max_chunks - 1)
         indices = sorted({round(i * step) for i in range(max_chunks)})
         return [chunks[i] for i in indices]
+
+    def _enforce_total_char_budget(self, chunks: List) -> List:
+        """Drop chunks once the cumulative content length exceeds the budget."""
+        budget = self._max_source_total_chars
+        if budget <= 0:
+            return chunks
+
+        total_chars = sum(len(getattr(c, "content", "")) for c in chunks)
+        if total_chars <= budget:
+            return chunks
+
+        # Keep chunks round-robin across documents to maintain coverage
+        chunks_by_doc = defaultdict(list)
+        for chunk in chunks:
+            chunks_by_doc[getattr(chunk, "document_id", 0)].append(chunk)
+
+        doc_ids = sorted(chunks_by_doc.keys())
+        per_doc_budget = max(1, budget // len(doc_ids)) if doc_ids else budget
+
+        kept: List = []
+        for doc_id in doc_ids:
+            doc_chunks = chunks_by_doc[doc_id]
+            doc_chars = 0
+            for chunk in doc_chunks:
+                c_len = len(getattr(chunk, "content", ""))
+                if doc_chars + c_len > per_doc_budget and kept:
+                    break
+                kept.append(chunk)
+                doc_chars += c_len
+
+        logger.info(
+            "Total char budget: kept %d/%d chunks (%d chars -> budget %d)",
+            len(kept),
+            len(chunks),
+            total_chars,
+            budget,
+        )
+        return kept
 
     def _cap_total_chunks(self, chunks: List) -> List:
         if len(chunks) <= self._max_total_chunks:
@@ -241,7 +291,9 @@ class SourceContextService:
             top_k=len(chunks),
         )
         chunks_by_id = {chunk.id: chunk for chunk in chunks}
-        ranked_chunks = [chunks_by_id[cid] for cid in candidate_ids if cid in chunks_by_id]
+        ranked_chunks = [
+            chunks_by_id[cid] for cid in candidate_ids if cid in chunks_by_id
+        ]
 
         selected = []
         used_ids = set()
@@ -364,10 +416,18 @@ class SourceContextService:
         if not files_to_parse:
             return additional_context, source_chunks, source_summary, chunks_for_prompt
 
-        semaphore = asyncio.Semaphore(self._source_chunk_concurrency)
+        per_request_semaphore = asyncio.Semaphore(self._source_chunk_concurrency)
+        n_files = len(files_to_parse)
+
+        # When there are many files, each file gets a proportional share
+        # of the total char budget so we compress *before* chunking.
+        per_doc_budget = min(
+            self._max_source_chars_per_doc,
+            max(20_000, self._max_source_total_chars // max(1, n_files)),
+        )
 
         async def chunk_one_document(file_path: str, document_id: int):
-            async with semaphore:
+            async with _GLOBAL_PARSE_SEMAPHORE, per_request_semaphore:
                 file_size = self._safe_get_file_size(file_path)
                 loader = DocumentsLoader(file_paths=[file_path])
                 await loader.load_documents()
@@ -383,12 +443,15 @@ class SourceContextService:
                     or len(merged_text) >= self._large_doc_chars_threshold
                 )
 
+                # Always compress when text exceeds per-doc budget,
+                # not just for "large" documents.
+                needs_compress = is_large_document or len(merged_text) > per_doc_budget
                 budgeted_text = (
                     self._compress_document_with_coverage(
                         merged_text,
-                        self._max_source_chars_per_doc,
+                        per_doc_budget,
                     )
-                    if is_large_document
+                    if needs_compress
                     else merged_text
                 )
 
@@ -431,15 +494,14 @@ class SourceContextService:
         )
 
         chunks = []
-        has_large_document = False
         global_chunk_id = 0
-        for document_chunks, is_large_document in chunk_results:
-            has_large_document = has_large_document or is_large_document
+        for document_chunks, _ in chunk_results:
             for chunk in document_chunks:
                 chunks.append(chunk)
 
-        if has_large_document:
-            chunks = self._cap_total_chunks(chunks)
+        # Always cap chunk count and total chars, not just for large docs.
+        chunks = self._cap_total_chunks(chunks)
+        chunks = self._enforce_total_char_budget(chunks)
 
         for chunk in chunks:
             chunk.id = global_chunk_id

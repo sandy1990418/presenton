@@ -4,6 +4,7 @@ from typing import List, Optional
 from models.llm_message import LLMSystemMessage, LLMUserMessage
 from models.llm_tools import SearchWebTool
 from services.llm_client import LLMClient
+from utils.context_budget import estimate_source_budget
 from utils.get_dynamic_models import (
     get_presentation_outline_model_with_n_slides,
     get_presentation_outline_model_with_chunks,
@@ -107,8 +108,13 @@ def get_user_prompt(
     language: str,
     additional_context: Optional[str] = None,
     chunks: Optional[List[dict]] = None,
+    max_chunks_chars: int = 80000,
 ):
-    chunks_section = format_chunks_for_prompt(chunks) if chunks else ""
+    chunks_section = (
+        format_chunks_for_prompt(chunks, max_total_chars=max_chunks_chars)
+        if chunks
+        else ""
+    )
 
     # When chunks are available the source information is already
     # represented in chunks_section – injecting the raw
@@ -142,6 +148,7 @@ def get_messages(
     instructions: Optional[str] = None,
     include_title_slide: bool = True,
     chunks: Optional[List[dict]] = None,
+    max_chunks_chars: int = 80000,
 ):
     has_chunks = bool(chunks)
     return [
@@ -152,7 +159,12 @@ def get_messages(
         ),
         LLMUserMessage(
             content=get_user_prompt(
-                content, n_slides, language, additional_context, chunks
+                content,
+                n_slides,
+                language,
+                additional_context,
+                chunks,
+                max_chunks_chars=max_chunks_chars,
             ),
         ),
     ]
@@ -197,6 +209,20 @@ async def generate_ppt_outline(
     else:
         response_model = get_presentation_outline_model_with_n_slides(n_slides)
 
+    # Compute dynamic chunk budget from context window
+    schema_json = str(response_model.model_json_schema())
+    sys_prompt = get_system_prompt(
+        tone, verbosity, instructions, include_title_slide, bool(chunks)
+    )
+    usr_prompt_no_chunks = get_user_prompt(
+        content, n_slides, language, additional_context, chunks=None
+    )
+    max_chunks_chars = estimate_source_budget(
+        model, [sys_prompt, usr_prompt_no_chunks, schema_json]
+    )
+    # Keep a reasonable floor so at least some chunks are included
+    max_chunks_chars = max(max_chunks_chars, 4000)
+
     try:
         async for chunk in client.stream_structured(
             model,
@@ -209,7 +235,8 @@ async def generate_ppt_outline(
                 verbosity,
                 instructions,
                 include_title_slide,
-                chunks,  # Pass chunks to get_messages
+                chunks,
+                max_chunks_chars=max_chunks_chars,
             ),
             response_model.model_json_schema(),
             strict=True,

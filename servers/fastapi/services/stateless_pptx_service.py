@@ -36,8 +36,10 @@ from models.stateless_models import (
 from services.document_chunker import format_chunk_content_for_slide
 from services.image_generation_service import ImageGenerationService
 from services.pptx_presentation_creator import PptxPresentationCreator
+from services.source_chunk_store import SOURCE_CHUNK_STORE
 from services.source_context_service import SourceContextService
 from services.temp_file_service import TEMP_FILE_SERVICE
+from utils.context_budget import estimate_source_budget
 from utils.get_layout_by_name import get_layout_by_name
 from utils.llm_calls.generate_presentation_outlines import generate_ppt_outline
 from utils.llm_calls.generate_presentation_structure import (
@@ -45,7 +47,10 @@ from utils.llm_calls.generate_presentation_structure import (
 )
 from utils.llm_calls.generate_slide_content import (
     get_slide_content_from_type_and_outline,
+    get_system_prompt as get_slide_system_prompt,
+    get_user_prompt as get_slide_user_prompt,
 )
+from utils.llm_provider import get_model
 from utils.ppt_utils import (
     get_presentation_title_from_outlines,
     select_toc_or_list_slide_layout_index,
@@ -185,9 +190,7 @@ class StatelessPptxService:
             needed_toc_count = math.ceil(
                 ((n_slides - 1) if include_title_slide else n_slides) / 10
             )
-            n_slides_to_generate -= math.ceil(
-                (n_slides - needed_toc_count) / 10
-            )
+            n_slides_to_generate -= math.ceil((n_slides - needed_toc_count) / 10)
 
         # Generate outlines
         outlines_text = ""
@@ -228,9 +231,7 @@ class StatelessPptxService:
                     outlines_to -= 1
 
                 toc_outline = "Table of Contents\n\n"
-                for outline in presentation_outlines.slides[
-                    outline_index:outlines_to
-                ]:
+                for outline in presentation_outlines.slides[outline_index:outlines_to]:
                     page_number = (
                         outline_index - i + n_toc_slides + 1
                         if include_title_slide
@@ -258,6 +259,13 @@ class StatelessPptxService:
         )
         title = get_presentation_title_from_outlines(presentation_outlines)
 
+        # Store full chunks in MinIO; return lightweight metadata only.
+        source_context_id: Optional[str] = None
+        lightweight_chunks: Optional[List[SourceChunk]] = None
+        if source_chunks:
+            source_context_id = await SOURCE_CHUNK_STORE.store(source_chunks)
+            lightweight_chunks = [c.without_content() for c in source_chunks]
+
         return StatelessOutlineResponse(
             title=title or "Untitled Presentation",
             outlines=presentation_outlines,
@@ -271,7 +279,8 @@ class StatelessPptxService:
                 n_slides=n_slides,
                 template=template,
                 source_summary=source_summary,
-                source_chunks=source_chunks,
+                source_context_id=source_context_id,
+                source_chunks=lightweight_chunks,
             ),
         )
 
@@ -286,6 +295,7 @@ class StatelessPptxService:
         title: Optional[str] = None,
         source_summary: Optional[str] = None,
         source_chunks: Optional[List[SourceChunk]] = None,
+        source_context_id: Optional[str] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None,
     ) -> str:
         """
@@ -306,6 +316,7 @@ class StatelessPptxService:
         Returns:
             Path to generated PPTX file
         """
+
         def report_progress(message: str, progress: float) -> None:
             if progress_callback:
                 progress_callback(message, progress)
@@ -369,6 +380,7 @@ class StatelessPptxService:
             instructions,
             source_summary,
             source_chunks,
+            source_context_id=source_context_id,
             progress_callback=lambda p: report_progress(
                 "Generating slide content...", 0.2 + p * 0.4
             ),
@@ -428,9 +440,9 @@ class StatelessPptxService:
         Returns:
             Path to generated PDF file
         """
-        sanitized_title = sanitize_filename(
-            title or str(uuid.uuid4())
-        ).replace(" ", "_")
+        sanitized_title = sanitize_filename(title or str(uuid.uuid4())).replace(
+            " ", "_"
+        )
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -467,6 +479,7 @@ class StatelessPptxService:
         instructions: Optional[str],
         source_summary: Optional[str] = None,
         source_chunks: Optional[List[SourceChunk]] = None,
+        source_context_id: Optional[str] = None,
         progress_callback: Optional[Callable[[float], None]] = None,
     ) -> List[StatelessSlideData]:
         """Generate slide content from outlines."""
@@ -476,11 +489,46 @@ class StatelessPptxService:
         # Use semaphore to limit concurrent requests
         semaphore = asyncio.Semaphore(5)
 
-        def build_source_context(outline) -> Optional[str]:
+        # Cache fetched chunks across slides to avoid re-fetching the same
+        # chunk from MinIO when multiple slides reference it.
+        _chunk_cache: dict[int, SourceChunk] = {}
+
+        # Pre-compute parts that are identical across all slides so we
+        # don't regenerate the same strings for every slide.
+        _model = get_model()
+        _sys_prompt = get_slide_system_prompt(
+            tone, verbosity, instructions, source_context=None
+        )
+
+        async def build_source_context(outline, max_chars: int = 0) -> Optional[str]:
             chunk_refs = getattr(outline, "chunk_refs", None)
-            if source_chunks and chunk_refs:
-                return format_chunk_content_for_slide(source_chunks, chunk_refs)
-            if source_summary and (chunk_refs is None or not source_chunks):
+            if not chunk_refs:
+                if source_summary:
+                    return f"## Source Summary\n{source_summary}"
+                return None
+
+            # Fetch only referenced chunks from MinIO (with cache)
+            if source_context_id:
+                missing = [r for r in chunk_refs if r not in _chunk_cache]
+                if missing:
+                    fetched = await SOURCE_CHUNK_STORE.get_chunks_by_ids(
+                        source_context_id, missing
+                    )
+                    for c in fetched:
+                        _chunk_cache[c.id] = c
+                cached = [_chunk_cache[r] for r in chunk_refs if r in _chunk_cache]
+                if cached:
+                    return format_chunk_content_for_slide(
+                        cached, chunk_refs, max_chars=max_chars
+                    )
+
+            # Fallback: use inline chunks
+            if source_chunks:
+                return format_chunk_content_for_slide(
+                    source_chunks, chunk_refs, max_chars=max_chars
+                )
+
+            if source_summary:
                 return f"## Source Summary\n{source_summary}"
             return None
 
@@ -489,7 +537,16 @@ class StatelessPptxService:
             outline,
         ):
             async with semaphore:
-                source_context = build_source_context(outline)
+                # Compute dynamic context budget for source content
+                schema_json = str(slide_layout.json_schema)
+                usr_prompt = get_slide_user_prompt(
+                    outline.content, language, source_context=None
+                )
+                budget = estimate_source_budget(
+                    _model, [_sys_prompt, usr_prompt, schema_json]
+                )
+
+                source_context = await build_source_context(outline, max_chars=budget)
                 return await get_slide_content_from_type_and_outline(
                     slide_layout,
                     outline,
@@ -638,6 +695,7 @@ class StatelessPptxService:
         Returns:
             Path to generated file
         """
+
         def report_progress(message: str, progress: float) -> None:
             if progress_callback:
                 progress_callback(message, progress)
@@ -650,6 +708,7 @@ class StatelessPptxService:
             title = None
             source_summary = None
             source_chunks = None
+            ctx_id = None
         else:
             report_progress("Generating outlines...", 0.0)
             outline_response = await self.generate_outlines(
@@ -668,6 +727,9 @@ class StatelessPptxService:
             outlines = outline_response.outlines
             title = outline_response.title
             source_summary = outline_response.generation_context.source_summary
+            # For one-step flow, pass context_id so _generate_slides
+            # fetches only the chunks each slide needs from MinIO.
+            ctx_id = outline_response.generation_context.source_context_id
             source_chunks = outline_response.generation_context.source_chunks
 
         # Generate PPTX
@@ -681,6 +743,7 @@ class StatelessPptxService:
             title=title,
             source_summary=source_summary,
             source_chunks=source_chunks,
+            source_context_id=ctx_id,
             progress_callback=lambda msg, prog: report_progress(
                 msg, 0.15 + prog * 0.85 if not slides_markdown else prog
             ),

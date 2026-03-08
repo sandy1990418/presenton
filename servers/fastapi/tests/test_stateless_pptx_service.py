@@ -18,9 +18,13 @@ from models.stateless_models import (
     StatelessGenerationContext,
     StatelessOutlineResponse,
 )
-from models.presentation_outline_model import PresentationOutlineModel, SlideOutlineModel
+from models.presentation_outline_model import (
+    PresentationOutlineModel,
+    SlideOutlineModel,
+)
 from models.presentation_layout import PresentationLayoutModel, SlideLayoutModel
 from models.presentation_structure_model import PresentationStructureModel
+from services.document_chunker import DocumentChunk
 from services.stateless_pptx_service import (
     StatelessSlideData,
     StatelessPptxService,
@@ -74,7 +78,7 @@ class TestStatelessPptxServiceInit:
 
     def test_initialization_with_default_temp_dir(self):
         """Test initialization creates temp directory."""
-        with patch('services.stateless_pptx_service.TEMP_FILE_SERVICE') as mock_temp:
+        with patch("services.stateless_pptx_service.TEMP_FILE_SERVICE") as mock_temp:
             mock_temp.create_temp_dir.return_value = "/tmp/test_dir"
 
             service = StatelessPptxService()
@@ -86,14 +90,16 @@ class TestStatelessPptxServiceInit:
         """Test initialization with provided temp directory."""
         custom_dir = str(tmp_path / "custom")
 
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             service = StatelessPptxService(temp_dir=custom_dir)
 
         assert service._temp_dir == custom_dir
 
     def test_image_service_initialization(self, tmp_path):
         """Test ImageGenerationService is initialized."""
-        with patch('services.stateless_pptx_service.ImageGenerationService') as mock_img_service:
+        with patch(
+            "services.stateless_pptx_service.ImageGenerationService"
+        ) as mock_img_service:
             service = StatelessPptxService(temp_dir=str(tmp_path))
 
             mock_img_service.assert_called_once_with(str(tmp_path))
@@ -105,7 +111,7 @@ class TestStatelessPptxServicePrepareSourceContext:
     @pytest.fixture
     def service(self, tmp_path):
         """Create a service instance for testing."""
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             return StatelessPptxService(temp_dir=str(tmp_path))
 
     @pytest.mark.anyio
@@ -140,13 +146,17 @@ class TestStatelessPptxServicePrepareSourceContext:
         }
         mock_chunk.summary = "Test summary"
 
-        with patch('services.stateless_pptx_service.DocumentsLoader') as mock_loader_class:
+        with patch(
+            "services.stateless_pptx_service.DocumentsLoader"
+        ) as mock_loader_class:
             mock_loader = AsyncMock()
             mock_loader.documents = ["Document 1 content", "Document 2 content"]
             mock_loader.load_documents = AsyncMock()
             mock_loader_class.return_value = mock_loader
 
-            with patch('services.stateless_pptx_service.DocumentChunker') as mock_chunker_class:
+            with patch(
+                "services.stateless_pptx_service.DocumentChunker"
+            ) as mock_chunker_class:
                 mock_chunker = MagicMock()
                 mock_chunker.chunk_documents = AsyncMock(return_value=[mock_chunk])
                 mock_chunker_class.return_value = mock_chunker
@@ -155,17 +165,18 @@ class TestStatelessPptxServicePrepareSourceContext:
 
         additional_context, source_chunks, source_summary, chunks_for_prompt = result
 
-        assert "Document 1 content" in additional_context
-        assert "Document 2 content" in additional_context
+        assert additional_context == ""
         assert source_chunks is not None
-        assert len(source_chunks) == 1
+        assert len(source_chunks) == 2
         assert source_summary is not None
         assert "Test summary" in source_summary
 
     @pytest.mark.anyio
     async def test_prepare_source_context_empty_documents(self, service):
         """Test with files that yield empty documents."""
-        with patch('services.stateless_pptx_service.DocumentsLoader') as mock_loader_class:
+        with patch(
+            "services.stateless_pptx_service.DocumentsLoader"
+        ) as mock_loader_class:
             mock_loader = AsyncMock()
             mock_loader.documents = ["", "  ", None]
             mock_loader.load_documents = AsyncMock()
@@ -190,13 +201,17 @@ class TestStatelessPptxServicePrepareSourceContext:
         }
         mock_chunk.summary = long_summary
 
-        with patch('services.stateless_pptx_service.DocumentsLoader') as mock_loader_class:
+        with patch(
+            "services.stateless_pptx_service.DocumentsLoader"
+        ) as mock_loader_class:
             mock_loader = AsyncMock()
             mock_loader.documents = ["Document content"]
             mock_loader.load_documents = AsyncMock()
             mock_loader_class.return_value = mock_loader
 
-            with patch('services.stateless_pptx_service.DocumentChunker') as mock_chunker_class:
+            with patch(
+                "services.stateless_pptx_service.DocumentChunker"
+            ) as mock_chunker_class:
                 mock_chunker = MagicMock()
                 mock_chunker.chunk_documents = AsyncMock(return_value=[mock_chunk])
                 mock_chunker_class.return_value = mock_chunker
@@ -207,6 +222,127 @@ class TestStatelessPptxServicePrepareSourceContext:
         assert len(source_summary) <= 2000
         assert source_summary.endswith("...")
 
+    @pytest.mark.anyio
+    async def test_prepare_source_context_rejects_too_many_files(self, service):
+        """Test file count hard limit validation."""
+        service._max_source_files = 1
+
+        with pytest.raises(HTTPException) as exc:
+            await service._prepare_source_context(["/a.pdf", "/b.pdf"])
+
+        assert exc.value.status_code == 400
+
+    @pytest.mark.anyio
+    async def test_prepare_source_context_rejects_oversize_total_bytes(
+        self, service, tmp_path
+    ):
+        """Test total upload size hard limit validation."""
+        oversized = tmp_path / "large.txt"
+        oversized.write_text("abc")
+        service._max_source_total_bytes = 2
+
+        with pytest.raises(HTTPException) as exc:
+            await service._prepare_source_context([str(oversized)])
+
+        assert exc.value.status_code == 413
+
+    @pytest.mark.anyio
+    async def test_prepare_source_context_uses_extractive_summary_when_budget_exceeded(
+        self, service
+    ):
+        """Test summary falls back to extractive mode for large contexts."""
+        service._summary_llm_max_chars = 10
+        chunk = DocumentChunk(
+            id=0,
+            title="Chunk",
+            summary="",
+            content="This is an extractive summary test. More details here.",
+        )
+
+        with patch(
+            "services.stateless_pptx_service.DocumentsLoader"
+        ) as mock_loader_class:
+            mock_loader = AsyncMock()
+            mock_loader.documents = ["x" * 100]
+            mock_loader.load_documents = AsyncMock()
+            mock_loader_class.return_value = mock_loader
+
+            with patch(
+                "services.stateless_pptx_service.DocumentChunker"
+            ) as mock_chunker_class:
+                mock_chunker = MagicMock()
+                mock_chunker.chunk_documents = AsyncMock(return_value=[chunk])
+                mock_chunker_class.return_value = mock_chunker
+
+                (
+                    _,
+                    _,
+                    source_summary,
+                    chunks_for_prompt,
+                ) = await service._prepare_source_context(["/path/to/file.pdf"])
+
+        assert source_summary is not None
+        assert "extractive summary test" in source_summary.lower()
+        assert chunks_for_prompt is not None
+        assert chunks_for_prompt[0]["summary"]
+
+    @pytest.mark.anyio
+    async def test_prepare_source_context_selects_relevant_prompt_chunks(self, service):
+        """Test prompt chunks are relevance-ranked and capped."""
+        service._max_outline_prompt_chunks = 2
+        chunks = [
+            DocumentChunk(
+                id=0,
+                title="Finance Baseline",
+                summary="General financial overview",
+                content="Revenue baseline and operating costs.",
+            ),
+            DocumentChunk(
+                id=1,
+                title="Marketing Campaign",
+                summary="Brand and social content",
+                content="Ad channels and brand activities.",
+            ),
+            DocumentChunk(
+                id=2,
+                title="Market Growth Outlook",
+                summary="Market growth trends and CAGR",
+                content="Strong market growth with expansion signals.",
+            ),
+        ]
+
+        with patch(
+            "services.stateless_pptx_service.DocumentsLoader"
+        ) as mock_loader_class:
+            mock_loader = AsyncMock()
+            mock_loader.documents = ["source doc"]
+            mock_loader.load_documents = AsyncMock()
+            mock_loader_class.return_value = mock_loader
+
+            with patch(
+                "services.stateless_pptx_service.DocumentChunker"
+            ) as mock_chunker_class:
+                mock_chunker = MagicMock()
+                mock_chunker.chunk_documents = AsyncMock(return_value=chunks)
+                mock_chunker_class.return_value = mock_chunker
+
+                (
+                    _,
+                    source_chunks,
+                    _,
+                    chunks_for_prompt,
+                ) = await service._prepare_source_context(
+                    ["/path/to/file.pdf"],
+                    query="market growth strategy",
+                )
+
+        assert source_chunks is not None
+        assert len(source_chunks) == 3
+        assert chunks_for_prompt is not None
+        assert len(chunks_for_prompt) == 2
+        prompt_ids = {chunk["id"] for chunk in chunks_for_prompt}
+        assert 2 in prompt_ids
+
 
 class TestStatelessPptxServiceGenerateOutlines:
     """Tests for generate_outlines method."""
@@ -214,7 +350,7 @@ class TestStatelessPptxServiceGenerateOutlines:
     @pytest.fixture
     def service(self, tmp_path):
         """Create a service instance for testing."""
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             return StatelessPptxService(temp_dir=str(tmp_path))
 
     @pytest.mark.anyio
@@ -225,11 +361,17 @@ class TestStatelessPptxServiceGenerateOutlines:
         async def mock_generate(*args, **kwargs):
             yield mock_outline_json
 
-        with patch.object(service, '_prepare_source_context', new_callable=AsyncMock) as mock_prep:
+        with patch.object(
+            service, "_prepare_source_context", new_callable=AsyncMock
+        ) as mock_prep:
             mock_prep.return_value = ("", None, None, None)
 
-            with patch('services.stateless_pptx_service.generate_ppt_outline', mock_generate):
-                with patch('services.stateless_pptx_service.get_presentation_title_from_outlines') as mock_title:
+            with patch(
+                "services.stateless_pptx_service.generate_ppt_outline", mock_generate
+            ):
+                with patch(
+                    "services.stateless_pptx_service.get_presentation_title_from_outlines"
+                ) as mock_title:
                     mock_title.return_value = "Test Presentation"
 
                     result = await service.generate_outlines(
@@ -250,11 +392,17 @@ class TestStatelessPptxServiceGenerateOutlines:
         async def mock_generate(*args, **kwargs):
             yield mock_outline_json
 
-        with patch.object(service, '_prepare_source_context', new_callable=AsyncMock) as mock_prep:
+        with patch.object(
+            service, "_prepare_source_context", new_callable=AsyncMock
+        ) as mock_prep:
             mock_prep.return_value = ("", None, None, None)
 
-            with patch('services.stateless_pptx_service.generate_ppt_outline', mock_generate):
-                with patch('services.stateless_pptx_service.get_presentation_title_from_outlines') as mock_title:
+            with patch(
+                "services.stateless_pptx_service.generate_ppt_outline", mock_generate
+            ):
+                with patch(
+                    "services.stateless_pptx_service.get_presentation_title_from_outlines"
+                ) as mock_title:
                     mock_title.return_value = "Test"
 
                     result = await service.generate_outlines(
@@ -270,13 +418,18 @@ class TestStatelessPptxServiceGenerateOutlines:
     @pytest.mark.anyio
     async def test_generate_outlines_invalid_json(self, service):
         """Test outline generation with invalid JSON response."""
+
         async def mock_generate(*args, **kwargs):
             yield "invalid json {{"
 
-        with patch.object(service, '_prepare_source_context', new_callable=AsyncMock) as mock_prep:
+        with patch.object(
+            service, "_prepare_source_context", new_callable=AsyncMock
+        ) as mock_prep:
             mock_prep.return_value = ("", None, None, None)
 
-            with patch('services.stateless_pptx_service.generate_ppt_outline', mock_generate):
+            with patch(
+                "services.stateless_pptx_service.generate_ppt_outline", mock_generate
+            ):
                 with pytest.raises(HTTPException) as exc_info:
                     await service.generate_outlines(
                         content="Test topic",
@@ -290,13 +443,18 @@ class TestStatelessPptxServiceGenerateOutlines:
     @pytest.mark.anyio
     async def test_generate_outlines_http_exception_from_llm(self, service):
         """Test that HTTPException from LLM is propagated."""
+
         async def mock_generate(*args, **kwargs):
             yield HTTPException(status_code=429, detail="Rate limited")
 
-        with patch.object(service, '_prepare_source_context', new_callable=AsyncMock) as mock_prep:
+        with patch.object(
+            service, "_prepare_source_context", new_callable=AsyncMock
+        ) as mock_prep:
             mock_prep.return_value = ("", None, None, None)
 
-            with patch('services.stateless_pptx_service.generate_ppt_outline', mock_generate):
+            with patch(
+                "services.stateless_pptx_service.generate_ppt_outline", mock_generate
+            ):
                 with pytest.raises(HTTPException) as exc_info:
                     await service.generate_outlines(
                         content="Test topic",
@@ -314,11 +472,17 @@ class TestStatelessPptxServiceGenerateOutlines:
         async def mock_generate(*args, **kwargs):
             yield mock_outline_json
 
-        with patch.object(service, '_prepare_source_context', new_callable=AsyncMock) as mock_prep:
+        with patch.object(
+            service, "_prepare_source_context", new_callable=AsyncMock
+        ) as mock_prep:
             mock_prep.return_value = ("", None, "Summary", None)
 
-            with patch('services.stateless_pptx_service.generate_ppt_outline', mock_generate):
-                with patch('services.stateless_pptx_service.get_presentation_title_from_outlines') as mock_title:
+            with patch(
+                "services.stateless_pptx_service.generate_ppt_outline", mock_generate
+            ):
+                with patch(
+                    "services.stateless_pptx_service.get_presentation_title_from_outlines"
+                ) as mock_title:
                     mock_title.return_value = "Test"
 
                     result = await service.generate_outlines(
@@ -351,7 +515,7 @@ class TestStatelessPptxServiceGeneratePptxFromOutlines:
     @pytest.fixture
     def service(self, tmp_path):
         """Create a service instance for testing."""
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             return StatelessPptxService(temp_dir=str(tmp_path))
 
     @pytest.fixture
@@ -392,33 +556,56 @@ class TestStatelessPptxServiceGeneratePptxFromOutlines:
         assert exc_info.value.status_code == 400
 
     @pytest.mark.anyio
-    async def test_generate_pptx_success(self, service, sample_outlines, mock_layout_model, tmp_path):
+    async def test_generate_pptx_success(
+        self, service, sample_outlines, mock_layout_model, tmp_path
+    ):
         """Test successful PPTX generation."""
         mock_structure = PresentationStructureModel(slides=[0, 1, 2])
 
-        with patch('services.stateless_pptx_service.get_layout_by_name', new_callable=AsyncMock) as mock_get_layout:
+        with patch(
+            "services.stateless_pptx_service.get_layout_by_name", new_callable=AsyncMock
+        ) as mock_get_layout:
             mock_get_layout.return_value = mock_layout_model
 
-            with patch('services.stateless_pptx_service.generate_presentation_structure', new_callable=AsyncMock) as mock_gen_structure:
+            with patch(
+                "services.stateless_pptx_service.generate_presentation_structure",
+                new_callable=AsyncMock,
+            ) as mock_gen_structure:
                 mock_gen_structure.return_value = mock_structure
 
-                with patch.object(service, '_generate_slides', new_callable=AsyncMock) as mock_gen_slides:
+                with patch.object(
+                    service, "_generate_slides", new_callable=AsyncMock
+                ) as mock_gen_slides:
                     mock_slides = [
-                        StatelessSlideData("general", "template_1", 0, {"title": "Intro"}),
-                        StatelessSlideData("general", "template_1", 1, {"title": "Main"}),
-                        StatelessSlideData("general", "template_1", 2, {"title": "End"}),
+                        StatelessSlideData(
+                            "general", "template_1", 0, {"title": "Intro"}
+                        ),
+                        StatelessSlideData(
+                            "general", "template_1", 1, {"title": "Main"}
+                        ),
+                        StatelessSlideData(
+                            "general", "template_1", 2, {"title": "End"}
+                        ),
                     ]
                     mock_gen_slides.return_value = mock_slides
 
-                    with patch.object(service, '_fetch_assets_for_slides', new_callable=AsyncMock):
-                        with patch.object(service, '_get_template_path', new_callable=AsyncMock) as mock_get_path:
+                    with patch.object(
+                        service, "_fetch_assets_for_slides", new_callable=AsyncMock
+                    ):
+                        with patch.object(
+                            service, "_get_template_path", new_callable=AsyncMock
+                        ) as mock_get_path:
                             mock_get_path.return_value = ""
 
-                            with patch('services.stateless_pptx_service.PptxPresentationCreator') as mock_creator_class:
+                            with patch(
+                                "services.stateless_pptx_service.PptxPresentationCreator"
+                            ) as mock_creator_class:
                                 mock_creator = MagicMock()
                                 mock_creator.create_ppt = AsyncMock()
                                 mock_creator.save = MagicMock()
-                                mock_creator_class.from_simple_json.return_value = mock_creator
+                                mock_creator_class.from_simple_json.return_value = (
+                                    mock_creator
+                                )
 
                                 result = await service.generate_pptx_from_outlines(
                                     outlines=sample_outlines,
@@ -429,7 +616,9 @@ class TestStatelessPptxServiceGeneratePptxFromOutlines:
         assert result.endswith(".pptx")
 
     @pytest.mark.anyio
-    async def test_generate_pptx_with_progress_callback(self, service, sample_outlines, mock_layout_model):
+    async def test_generate_pptx_with_progress_callback(
+        self, service, sample_outlines, mock_layout_model
+    ):
         """Test that progress callback is called."""
         mock_structure = PresentationStructureModel(slides=[0, 1, 2])
         progress_calls = []
@@ -437,26 +626,41 @@ class TestStatelessPptxServiceGeneratePptxFromOutlines:
         def progress_callback(message, progress):
             progress_calls.append((message, progress))
 
-        with patch('services.stateless_pptx_service.get_layout_by_name', new_callable=AsyncMock) as mock_get_layout:
+        with patch(
+            "services.stateless_pptx_service.get_layout_by_name", new_callable=AsyncMock
+        ) as mock_get_layout:
             mock_get_layout.return_value = mock_layout_model
 
-            with patch('services.stateless_pptx_service.generate_presentation_structure', new_callable=AsyncMock) as mock_gen_structure:
+            with patch(
+                "services.stateless_pptx_service.generate_presentation_structure",
+                new_callable=AsyncMock,
+            ) as mock_gen_structure:
                 mock_gen_structure.return_value = mock_structure
 
-                with patch.object(service, '_generate_slides', new_callable=AsyncMock) as mock_gen_slides:
+                with patch.object(
+                    service, "_generate_slides", new_callable=AsyncMock
+                ) as mock_gen_slides:
                     mock_gen_slides.return_value = [
                         StatelessSlideData("general", "template_1", 0, {}),
                     ]
 
-                    with patch.object(service, '_fetch_assets_for_slides', new_callable=AsyncMock):
-                        with patch.object(service, '_get_template_path', new_callable=AsyncMock) as mock_get_path:
+                    with patch.object(
+                        service, "_fetch_assets_for_slides", new_callable=AsyncMock
+                    ):
+                        with patch.object(
+                            service, "_get_template_path", new_callable=AsyncMock
+                        ) as mock_get_path:
                             mock_get_path.return_value = ""
 
-                            with patch('services.stateless_pptx_service.PptxPresentationCreator') as mock_creator_class:
+                            with patch(
+                                "services.stateless_pptx_service.PptxPresentationCreator"
+                            ) as mock_creator_class:
                                 mock_creator = MagicMock()
                                 mock_creator.create_ppt = AsyncMock()
                                 mock_creator.save = MagicMock()
-                                mock_creator_class.from_simple_json.return_value = mock_creator
+                                mock_creator_class.from_simple_json.return_value = (
+                                    mock_creator
+                                )
 
                                 await service.generate_pptx_from_outlines(
                                     outlines=sample_outlines,
@@ -471,30 +675,47 @@ class TestStatelessPptxServiceGeneratePptxFromOutlines:
         assert any("Loading template" in msg for msg in messages)
 
     @pytest.mark.anyio
-    async def test_generate_pptx_with_custom_template(self, service, sample_outlines, mock_layout_model):
+    async def test_generate_pptx_with_custom_template(
+        self, service, sample_outlines, mock_layout_model
+    ):
         """Test generation with custom template prefix."""
         mock_structure = PresentationStructureModel(slides=[0])
 
-        with patch('services.stateless_pptx_service.get_layout_by_name', new_callable=AsyncMock) as mock_get_layout:
+        with patch(
+            "services.stateless_pptx_service.get_layout_by_name", new_callable=AsyncMock
+        ) as mock_get_layout:
             mock_get_layout.return_value = mock_layout_model
 
-            with patch('services.stateless_pptx_service.generate_presentation_structure', new_callable=AsyncMock) as mock_gen_structure:
+            with patch(
+                "services.stateless_pptx_service.generate_presentation_structure",
+                new_callable=AsyncMock,
+            ) as mock_gen_structure:
                 mock_gen_structure.return_value = mock_structure
 
-                with patch.object(service, '_generate_slides', new_callable=AsyncMock) as mock_gen_slides:
+                with patch.object(
+                    service, "_generate_slides", new_callable=AsyncMock
+                ) as mock_gen_slides:
                     mock_gen_slides.return_value = [
                         StatelessSlideData("custom", "template_1", 0, {}),
                     ]
 
-                    with patch.object(service, '_fetch_assets_for_slides', new_callable=AsyncMock):
-                        with patch.object(service, '_get_template_path', new_callable=AsyncMock) as mock_get_path:
+                    with patch.object(
+                        service, "_fetch_assets_for_slides", new_callable=AsyncMock
+                    ):
+                        with patch.object(
+                            service, "_get_template_path", new_callable=AsyncMock
+                        ) as mock_get_path:
                             mock_get_path.return_value = ""
 
-                            with patch('services.stateless_pptx_service.PptxPresentationCreator') as mock_creator_class:
+                            with patch(
+                                "services.stateless_pptx_service.PptxPresentationCreator"
+                            ) as mock_creator_class:
                                 mock_creator = MagicMock()
                                 mock_creator.create_ppt = AsyncMock()
                                 mock_creator.save = MagicMock()
-                                mock_creator_class.from_simple_json.return_value = mock_creator
+                                mock_creator_class.from_simple_json.return_value = (
+                                    mock_creator
+                                )
 
                                 result = await service.generate_pptx_from_outlines(
                                     outlines=sample_outlines,
@@ -508,10 +729,22 @@ class TestStatelessPptxServiceGeneratePptxFromOutlines:
 class TestStatelessPptxServiceGenerateSlides:
     """Tests for _generate_slides method."""
 
+    @pytest.fixture(autouse=True)
+    def mock_budget_deps(self):
+        """Mock get_model and estimate_source_budget used by generate_with_semaphore."""
+        with (
+            patch("services.stateless_pptx_service.get_model", return_value="gpt-4.1"),
+            patch(
+                "services.stateless_pptx_service.estimate_source_budget",
+                return_value=200_000,
+            ),
+        ):
+            yield
+
     @pytest.fixture
     def service(self, tmp_path):
         """Create a service instance for testing."""
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             return StatelessPptxService(temp_dir=str(tmp_path))
 
     @pytest.fixture
@@ -543,9 +776,14 @@ class TestStatelessPptxServiceGenerateSlides:
         return PresentationStructureModel(slides=[0, 0])
 
     @pytest.mark.anyio
-    async def test_generate_slides_success(self, service, sample_outlines, mock_layout_model, mock_structure):
+    async def test_generate_slides_success(
+        self, service, sample_outlines, mock_layout_model, mock_structure
+    ):
         """Test successful slide generation."""
-        with patch('services.stateless_pptx_service.get_slide_content_from_type_and_outline', new_callable=AsyncMock) as mock_gen:
+        with patch(
+            "services.stateless_pptx_service.get_slide_content_from_type_and_outline",
+            new_callable=AsyncMock,
+        ) as mock_gen:
             mock_gen.return_value = {"title": "Generated Title", "body": "Content"}
 
             slides = await service._generate_slides(
@@ -563,7 +801,9 @@ class TestStatelessPptxServiceGenerateSlides:
         assert slides[0].content["title"] == "Generated Title"
 
     @pytest.mark.anyio
-    async def test_generate_slides_with_source_context(self, service, sample_outlines, mock_layout_model, mock_structure):
+    async def test_generate_slides_with_source_context(
+        self, service, sample_outlines, mock_layout_model, mock_structure
+    ):
         """Test slide generation with source chunks context."""
         source_chunks = [
             SourceChunk(id=1, title="Ch1", summary="Sum1", content="Content1"),
@@ -574,10 +814,15 @@ class TestStatelessPptxServiceGenerateSlides:
         sample_outlines.slides[0].chunk_refs = [1]
         sample_outlines.slides[1].chunk_refs = [2]
 
-        with patch('services.stateless_pptx_service.get_slide_content_from_type_and_outline', new_callable=AsyncMock) as mock_gen:
+        with patch(
+            "services.stateless_pptx_service.get_slide_content_from_type_and_outline",
+            new_callable=AsyncMock,
+        ) as mock_gen:
             mock_gen.return_value = {"title": "Test"}
 
-            with patch('services.stateless_pptx_service.format_chunk_content_for_slide') as mock_format:
+            with patch(
+                "services.stateless_pptx_service.format_chunk_content_for_slide"
+            ) as mock_format:
                 mock_format.return_value = "Formatted chunk content"
 
                 slides = await service._generate_slides(
@@ -596,9 +841,14 @@ class TestStatelessPptxServiceGenerateSlides:
         assert mock_format.call_count == 2
 
     @pytest.mark.anyio
-    async def test_generate_slides_with_source_summary_fallback(self, service, sample_outlines, mock_layout_model, mock_structure):
+    async def test_generate_slides_with_source_summary_fallback(
+        self, service, sample_outlines, mock_layout_model, mock_structure
+    ):
         """Test slide generation with source summary as fallback."""
-        with patch('services.stateless_pptx_service.get_slide_content_from_type_and_outline', new_callable=AsyncMock) as mock_gen:
+        with patch(
+            "services.stateless_pptx_service.get_slide_content_from_type_and_outline",
+            new_callable=AsyncMock,
+        ) as mock_gen:
             mock_gen.return_value = {"title": "Test"}
 
             slides = await service._generate_slides(
@@ -616,17 +866,24 @@ class TestStatelessPptxServiceGenerateSlides:
         call_args = mock_gen.call_args_list
         for call in call_args:
             # source_context should include summary
-            source_ctx = call[0][6] if len(call[0]) > 6 else call[1].get('source_context')
+            source_ctx = (
+                call[0][6] if len(call[0]) > 6 else call[1].get("source_context")
+            )
             if source_ctx:
                 assert "Document summary content" in source_ctx
 
     @pytest.mark.anyio
-    async def test_generate_slides_extracts_speaker_note(self, service, sample_outlines, mock_layout_model, mock_structure):
+    async def test_generate_slides_extracts_speaker_note(
+        self, service, sample_outlines, mock_layout_model, mock_structure
+    ):
         """Test that speaker notes are extracted from content."""
-        with patch('services.stateless_pptx_service.get_slide_content_from_type_and_outline', new_callable=AsyncMock) as mock_gen:
+        with patch(
+            "services.stateless_pptx_service.get_slide_content_from_type_and_outline",
+            new_callable=AsyncMock,
+        ) as mock_gen:
             mock_gen.return_value = {
                 "title": "Test",
-                "__speaker_note__": "Speaker notes here"
+                "__speaker_note__": "Speaker notes here",
             }
 
             slides = await service._generate_slides(
@@ -642,14 +899,19 @@ class TestStatelessPptxServiceGenerateSlides:
         assert slides[0].speaker_note == "Speaker notes here"
 
     @pytest.mark.anyio
-    async def test_generate_slides_progress_callback(self, service, sample_outlines, mock_layout_model, mock_structure):
+    async def test_generate_slides_progress_callback(
+        self, service, sample_outlines, mock_layout_model, mock_structure
+    ):
         """Test progress callback is called during generation."""
         progress_values = []
 
         def callback(progress):
             progress_values.append(progress)
 
-        with patch('services.stateless_pptx_service.get_slide_content_from_type_and_outline', new_callable=AsyncMock) as mock_gen:
+        with patch(
+            "services.stateless_pptx_service.get_slide_content_from_type_and_outline",
+            new_callable=AsyncMock,
+        ) as mock_gen:
             mock_gen.return_value = {"title": "Test"}
 
             await service._generate_slides(
@@ -673,7 +935,7 @@ class TestStatelessPptxServiceFetchAssets:
     @pytest.fixture
     def service(self, tmp_path):
         """Create a service instance for testing."""
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             return StatelessPptxService(temp_dir=str(tmp_path))
 
     @pytest.mark.anyio
@@ -681,11 +943,19 @@ class TestStatelessPptxServiceFetchAssets:
         """Test fetching assets for slides."""
         slides = [
             StatelessSlideData("general", "template_1", 0, {"image_prompt": "sunset"}),
-            StatelessSlideData("general", "template_1", 1, {"image_prompt": "mountain"}),
+            StatelessSlideData(
+                "general", "template_1", 1, {"image_prompt": "mountain"}
+            ),
         ]
 
-        with patch('services.stateless_pptx_service.process_slide_and_fetch_assets', new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.return_value = ({"image_prompt": "sunset", "image_url": "/img/1.jpg"}, None)
+        with patch(
+            "services.stateless_pptx_service.process_slide_and_fetch_assets",
+            new_callable=AsyncMock,
+        ) as mock_fetch:
+            mock_fetch.return_value = (
+                {"image_prompt": "sunset", "image_url": "/img/1.jpg"},
+                None,
+            )
 
             await service._fetch_assets_for_slides(slides)
 
@@ -704,7 +974,10 @@ class TestStatelessPptxServiceFetchAssets:
         def callback(progress):
             progress_values.append(progress)
 
-        with patch('services.stateless_pptx_service.process_slide_and_fetch_assets', new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "services.stateless_pptx_service.process_slide_and_fetch_assets",
+            new_callable=AsyncMock,
+        ) as mock_fetch:
             mock_fetch.return_value = ({}, None)
 
             await service._fetch_assets_for_slides(slides, progress_callback=callback)
@@ -720,7 +993,7 @@ class TestStatelessPptxServiceConvertSlidesToJson:
     @pytest.fixture
     def service(self, tmp_path):
         """Create a service instance for testing."""
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             return StatelessPptxService(temp_dir=str(tmp_path))
 
     def test_convert_slides_with_template_layout(self, service):
@@ -741,9 +1014,11 @@ class TestStatelessPptxServiceConvertSlidesToJson:
         """Test conversion preserves speaker notes."""
         slides = [
             StatelessSlideData(
-                "general", "template_1", 0,
+                "general",
+                "template_1",
+                0,
                 {"title": "Slide 1"},
-                speaker_note="Notes here"
+                speaker_note="Notes here",
             ),
         ]
 
@@ -778,7 +1053,7 @@ class TestStatelessPptxServiceGetTemplatePath:
     @pytest.fixture
     def service(self, tmp_path):
         """Create a service instance for testing."""
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             return StatelessPptxService(temp_dir=str(tmp_path))
 
     @pytest.mark.anyio
@@ -790,7 +1065,7 @@ class TestStatelessPptxServiceGetTemplatePath:
         template_file = templates_dir / "general.pptx"
         template_file.write_text("mock pptx content")
 
-        with patch('os.path.dirname') as mock_dirname:
+        with patch("os.path.dirname") as mock_dirname:
             mock_dirname.return_value = str(tmp_path)
 
             result = await service._get_template_path("general")
@@ -805,7 +1080,7 @@ class TestStatelessPptxServiceGetTemplatePath:
         default_file = templates_dir / "general.pptx"
         default_file.write_text("default content")
 
-        with patch('os.path.dirname') as mock_dirname:
+        with patch("os.path.dirname") as mock_dirname:
             mock_dirname.return_value = str(tmp_path)
 
             result = await service._get_template_path("nonexistent")
@@ -815,7 +1090,7 @@ class TestStatelessPptxServiceGetTemplatePath:
     @pytest.mark.anyio
     async def test_get_template_path_no_templates(self, service, tmp_path):
         """Test when no templates exist."""
-        with patch('os.path.dirname') as mock_dirname:
+        with patch("os.path.dirname") as mock_dirname:
             mock_dirname.return_value = str(tmp_path)
 
             result = await service._get_template_path("general")
@@ -829,7 +1104,7 @@ class TestStatelessPptxServiceGenerateFullPresentation:
     @pytest.fixture
     def service(self, tmp_path):
         """Create a service instance for testing."""
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             return StatelessPptxService(temp_dir=str(tmp_path))
 
     @pytest.mark.anyio
@@ -843,10 +1118,14 @@ class TestStatelessPptxServiceGenerateFullPresentation:
             generation_context=StatelessGenerationContext(),
         )
 
-        with patch.object(service, 'generate_outlines', new_callable=AsyncMock) as mock_gen_outlines:
+        with patch.object(
+            service, "generate_outlines", new_callable=AsyncMock
+        ) as mock_gen_outlines:
             mock_gen_outlines.return_value = mock_outline_response
 
-            with patch.object(service, 'generate_pptx_from_outlines', new_callable=AsyncMock) as mock_gen_pptx:
+            with patch.object(
+                service, "generate_pptx_from_outlines", new_callable=AsyncMock
+            ) as mock_gen_pptx:
                 mock_gen_pptx.return_value = "/tmp/presentation.pptx"
 
                 result = await service.generate_full_presentation(
@@ -862,7 +1141,9 @@ class TestStatelessPptxServiceGenerateFullPresentation:
     @pytest.mark.anyio
     async def test_generate_full_presentation_with_slides_markdown(self, service):
         """Test full presentation generation with pre-defined markdown."""
-        with patch.object(service, 'generate_pptx_from_outlines', new_callable=AsyncMock) as mock_gen_pptx:
+        with patch.object(
+            service, "generate_pptx_from_outlines", new_callable=AsyncMock
+        ) as mock_gen_pptx:
             mock_gen_pptx.return_value = "/tmp/presentation.pptx"
 
             result = await service.generate_full_presentation(
@@ -893,10 +1174,14 @@ class TestStatelessPptxServiceGenerateFullPresentation:
             generation_context=StatelessGenerationContext(),
         )
 
-        with patch.object(service, 'generate_outlines', new_callable=AsyncMock) as mock_gen_outlines:
+        with patch.object(
+            service, "generate_outlines", new_callable=AsyncMock
+        ) as mock_gen_outlines:
             mock_gen_outlines.return_value = mock_outline_response
 
-            with patch.object(service, 'generate_pptx_from_outlines', new_callable=AsyncMock) as mock_gen_pptx:
+            with patch.object(
+                service, "generate_pptx_from_outlines", new_callable=AsyncMock
+            ) as mock_gen_pptx:
                 mock_gen_pptx.return_value = "/tmp/presentation.pptx"
 
                 await service.generate_full_presentation(
@@ -916,7 +1201,7 @@ class TestStatelessPptxServiceGeneratePdfFromSlides:
     @pytest.fixture
     def service(self, tmp_path):
         """Create a service instance for testing."""
-        with patch('services.stateless_pptx_service.ImageGenerationService'):
+        with patch("services.stateless_pptx_service.ImageGenerationService"):
             return StatelessPptxService(temp_dir=str(tmp_path))
 
     @pytest.mark.anyio
@@ -931,7 +1216,7 @@ class TestStatelessPptxServiceGeneratePdfFromSlides:
         mock_response.status = 200
         mock_response.read = AsyncMock(return_value=b"%PDF-1.4 mock content")
 
-        with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch("aiohttp.ClientSession") as mock_session_class:
             post_context = AsyncMock()
             post_context.__aenter__.return_value = mock_response
             post_context.__aexit__.return_value = None
@@ -962,7 +1247,7 @@ class TestStatelessPptxServiceGeneratePdfFromSlides:
         mock_response.status = 500
         mock_response.text = AsyncMock(return_value="Internal Server Error")
 
-        with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch("aiohttp.ClientSession") as mock_session_class:
             post_context = AsyncMock()
             post_context.__aenter__.return_value = mock_response
             post_context.__aexit__.return_value = None
@@ -993,7 +1278,7 @@ class TestStatelessPptxServiceGeneratePdfFromSlides:
         mock_response.status = 200
         mock_response.read = AsyncMock(return_value=b"%PDF content")
 
-        with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch("aiohttp.ClientSession") as mock_session_class:
             post_context = AsyncMock()
             post_context.__aenter__.return_value = mock_response
             post_context.__aexit__.return_value = None

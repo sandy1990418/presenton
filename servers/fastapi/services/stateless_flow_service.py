@@ -74,9 +74,7 @@ class StatelessFlowService:
             )
 
     @classmethod
-    async def generate_full_presentation(
-        cls, request: StatelessGenerateRequest
-    ) -> str:
+    async def generate_full_presentation(cls, request: StatelessGenerateRequest) -> str:
         cls.validate_generate_request(request)
         template = cls.normalize_template(request.template)
         export_as = cls.normalize_export_as(request.export_as)
@@ -138,4 +136,5 @@ class StatelessFlowService:
             title=request.title,
             source_summary=request.get_source_summary(),
             source_chunks=request.get_source_chunks(),
+            source_context_id=request.get_source_context_id(),
         )
