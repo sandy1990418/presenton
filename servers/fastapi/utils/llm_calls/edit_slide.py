@@ -1,8 +1,7 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 from models.llm_message import LLMSystemMessage, LLMUserMessage
 from models.presentation_layout import SlideLayoutModel
-from models.sql.slide import SlideModel
 from services.llm_client import LLMClient
 from utils.llm_client_error_handler import handle_llm_client_exceptions
 from utils.llm_provider import get_model
@@ -78,13 +77,25 @@ def get_messages(
 
 async def get_edited_slide_content(
     prompt: str,
-    slide: SlideModel,
+    slide_content: Dict[str, Any],
     language: str,
     slide_layout: SlideLayoutModel,
     tone: Optional[str] = None,
     verbosity: Optional[str] = None,
     instructions: Optional[str] = None,
 ):
+    """
+    Edit slide content based on the provided prompt.
+    
+    Args:
+        prompt: The edit instruction
+        slide_content: The slide content dict (replaces SlideModel.content)
+        language: Output language
+        slide_layout: The slide layout schema
+        tone: Optional tone setting
+        verbosity: Optional verbosity setting
+        instructions: Optional custom instructions
+    """
     model = get_model()
 
     response_schema = remove_fields_from_schema(
@@ -108,7 +119,7 @@ async def get_edited_slide_content(
         response = await client.generate_structured(
             model=model,
             messages=get_messages(
-                prompt, slide.content, language, tone, verbosity, instructions
+                prompt, slide_content, language, tone, verbosity, instructions
             ),
             response_format=response_schema,
             strict=False,

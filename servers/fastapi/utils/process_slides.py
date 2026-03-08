@@ -1,9 +1,8 @@
 import asyncio
 import os
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 from models.image_prompt import ImagePrompt
-from models.sql.image_asset import ImageAsset
-from models.sql.slide import SlideModel
+from models.stateless_models import ImageAssetData
 from services.icon_finder_service import ICON_FINDER_SERVICE
 from services.image_generation_service import ImageGenerationService
 from utils.asset_directory_utils import get_images_directory
@@ -47,16 +46,25 @@ def convert_file_path_to_web_url(file_path: str) -> str:
 
 async def process_slide_and_fetch_assets(
     image_generation_service: ImageGenerationService,
-    slide: SlideModel,
-) -> List[ImageAsset]:
-
-    image_paths = get_dict_paths_with_key(slide.content, "__image_prompt__")
-    icon_paths = get_dict_paths_with_key(slide.content, "__icon_query__")
+    slide_content: Dict[str, Any],
+) -> Tuple[Dict[str, Any], List[ImageAssetData]]:
+    """
+    Process a slide's content and fetch all required assets.
+    
+    Args:
+        image_generation_service: Service for generating images
+        slide_content: The slide content dict (will be modified in place)
+    
+    Returns:
+        Tuple of (updated slide_content, list of generated image assets)
+    """
+    image_paths = get_dict_paths_with_key(slide_content, "__image_prompt__")
+    icon_paths = get_dict_paths_with_key(slide_content, "__icon_query__")
 
     # Create tasks for image generation
     image_tasks = []
     for image_path in image_paths:
-        __image_prompt__parent = get_dict_at_path(slide.content, image_path)
+        __image_prompt__parent = get_dict_at_path(slide_content, image_path)
         task = asyncio.create_task(
             image_generation_service.generate_image(
                 ImagePrompt(
@@ -69,7 +77,7 @@ async def process_slide_and_fetch_assets(
     # Create tasks for icon search
     icon_tasks = []
     for icon_path in icon_paths:
-        __icon_query__parent = get_dict_at_path(slide.content, icon_path)
+        __icon_query__parent = get_dict_at_path(slide_content, icon_path)
         task = asyncio.create_task(
             ICON_FINDER_SERVICE.search_icons(__icon_query__parent["__icon_query__"])
         )
@@ -87,41 +95,62 @@ async def process_slide_and_fetch_assets(
         print("Timeout: Asset generation took too long, using placeholders")
         # Create fallback results without manually cancelling tasks
         results = ["/static/images/placeholder.jpg"] * len(image_tasks) + [["placeholder-icon"]] * len(icon_tasks)
+    
     # Process image results
-    return_assets = []
+    return_assets: List[ImageAssetData] = []
     for i, image_path in enumerate(image_paths):
-        image_dict = get_dict_at_path(slide.content, image_path)
+        image_dict = get_dict_at_path(slide_content, image_path)
         result = results[i]
         
         if isinstance(result, Exception):
             print(f"Image generation failed: {result}")
             image_dict["__image_url__"] = convert_file_path_to_web_url("/static/images/placeholder.jpg")
-        elif isinstance(result, ImageAsset):
+        elif isinstance(result, ImageAssetData):
             return_assets.append(result)
+            image_dict["__image_url__"] = convert_file_path_to_web_url(result.path)
+        elif hasattr(result, "path"):
+            # Handle any object with a path attribute
+            return_assets.append(ImageAssetData(path=result.path))
             image_dict["__image_url__"] = convert_file_path_to_web_url(result.path)
         else:
             image_dict["__image_url__"] = convert_file_path_to_web_url(result)
-        set_dict_at_path(slide.content, image_path, image_dict)
+        set_dict_at_path(slide_content, image_path, image_dict)
 
     # Process icon results
+    icon_results_start = len(image_tasks)
     for i, icon_path in enumerate(icon_paths):
-        icon_dict = get_dict_at_path(slide.content, icon_path)
-        icon_result = results.pop()
-        if icon_result and len(icon_result) > 0:
+        icon_dict = get_dict_at_path(slide_content, icon_path)
+        icon_result = results[icon_results_start + i] if icon_results_start + i < len(results) else None
+        
+        if isinstance(icon_result, Exception):
+            print(f"Icon search failed: {icon_result}")
+            icon_dict["__icon_url__"] = "/static/icons/placeholder.svg"
+        elif icon_result and isinstance(icon_result, list) and len(icon_result) > 0:
             icon_dict["__icon_url__"] = icon_result[0]
         else:
             # Fallback to placeholder if no icon found
             icon_dict["__icon_url__"] = "/static/icons/placeholder.svg"
-        set_dict_at_path(slide.content, icon_path, icon_dict)
+        set_dict_at_path(slide_content, icon_path, icon_dict)
 
-    return return_assets
+    return slide_content, return_assets
 
 
 async def process_old_and_new_slides_and_fetch_assets(
     image_generation_service: ImageGenerationService,
-    old_slide_content: dict,
-    new_slide_content: dict,
-) -> List[ImageAsset]:
+    old_slide_content: Dict[str, Any],
+    new_slide_content: Dict[str, Any],
+) -> Tuple[Dict[str, Any], List[ImageAssetData]]:
+    """
+    Process slides with caching - reuse assets if prompts/queries match.
+    
+    Args:
+        image_generation_service: Service for generating images
+        old_slide_content: Previous slide content (for caching)
+        new_slide_content: New slide content (will be modified)
+    
+    Returns:
+        Tuple of (updated new_slide_content, list of newly generated assets)
+    """
     # Finds all old images
     old_image_dict_paths = get_dict_paths_with_key(
         old_slide_content, "__image_prompt__"
@@ -220,26 +249,35 @@ async def process_old_and_new_slides_and_fetch_assets(
         new_icons = [["placeholder-icon"]] * len(async_icon_fetch_tasks)
 
     # list of new assets
-    new_assets = []
+    new_assets: List[ImageAssetData] = []
 
     # Sets new image and icon urls for assets that were fetched
-    for i, new_image in enumerate(new_images):
-        if new_images_fetch_status[i]:
-            fetched_image = new_images[i]
+    fetch_idx = 0
+    for i, should_fetch in enumerate(new_images_fetch_status):
+        if should_fetch:
+            fetched_image = new_images[fetch_idx]
+            fetch_idx += 1
             if isinstance(fetched_image, Exception):
                 print(f"Image generation failed: {fetched_image}")
                 image_url = convert_file_path_to_web_url("/static/images/placeholder.jpg")
-            elif isinstance(fetched_image, ImageAsset):
+            elif isinstance(fetched_image, ImageAssetData):
                 new_assets.append(fetched_image)
+                image_url = convert_file_path_to_web_url(fetched_image.path)
+            elif hasattr(fetched_image, "path"):
+                new_assets.append(ImageAssetData(path=fetched_image.path))
                 image_url = convert_file_path_to_web_url(fetched_image.path)
             else:
                 image_url = convert_file_path_to_web_url(fetched_image)
             new_image_dicts[i]["__image_url__"] = image_url
 
-    for i, new_icon in enumerate(new_icons):
-        if new_icons_fetch_status[i]:
-            icon_result = new_icons[i]
-            if icon_result and len(icon_result) > 0:
+    fetch_idx = 0
+    for i, should_fetch in enumerate(new_icons_fetch_status):
+        if should_fetch:
+            icon_result = new_icons[fetch_idx]
+            fetch_idx += 1
+            if isinstance(icon_result, Exception):
+                new_icon_dicts[i]["__icon_url__"] = "/static/icons/placeholder.svg"
+            elif icon_result and isinstance(icon_result, list) and len(icon_result) > 0:
                 new_icon_dicts[i]["__icon_url__"] = icon_result[0]
             else:
                 # Fallback to placeholder if no icon found
@@ -251,20 +289,30 @@ async def process_old_and_new_slides_and_fetch_assets(
     for i, new_icon_dict in enumerate(new_icon_dicts):
         set_dict_at_path(new_slide_content, new_icon_dict_paths[i], new_icon_dict)
 
-    return new_assets
+    return new_slide_content, new_assets
 
 
-def process_slide_add_placeholder_assets(slide: SlideModel):
-
-    image_paths = get_dict_paths_with_key(slide.content, "__image_prompt__")
-    icon_paths = get_dict_paths_with_key(slide.content, "__icon_query__")
+def process_slide_add_placeholder_assets(slide_content: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Add placeholder URLs to all image and icon slots.
+    
+    Args:
+        slide_content: Slide content dict
+    
+    Returns:
+        Updated slide content with placeholder URLs
+    """
+    image_paths = get_dict_paths_with_key(slide_content, "__image_prompt__")
+    icon_paths = get_dict_paths_with_key(slide_content, "__icon_query__")
 
     for image_path in image_paths:
-        image_dict = get_dict_at_path(slide.content, image_path)
+        image_dict = get_dict_at_path(slide_content, image_path)
         image_dict["__image_url__"] = "/static/images/placeholder.jpg"
-        set_dict_at_path(slide.content, image_path, image_dict)
+        set_dict_at_path(slide_content, image_path, image_dict)
 
     for icon_path in icon_paths:
-        icon_dict = get_dict_at_path(slide.content, icon_path)
+        icon_dict = get_dict_at_path(slide_content, icon_path)
         icon_dict["__icon_url__"] = "/static/icons/placeholder.svg"
-        set_dict_at_path(slide.content, icon_path, icon_dict)
+        set_dict_at_path(slide_content, icon_path, icon_dict)
+
+    return slide_content

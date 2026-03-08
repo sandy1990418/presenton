@@ -13,7 +13,14 @@ def get_system_prompt(
     tone: Optional[str] = None,
     verbosity: Optional[str] = None,
     instructions: Optional[str] = None,
+    source_context: Optional[str] = None,
 ):
+    source_context_instructions = ""
+    if source_context:
+        source_context_instructions = """
+        - If Source Context is provided, use it as the primary factual reference.
+        - Do not invent statistics or claims that are not supported by the Source Context.
+        """
     return f"""
         Generate structured slide based on provided outline, follow mentioned steps and notes and provide structured output.
 
@@ -48,6 +55,7 @@ def get_system_prompt(
             - If verbosity is 'concise', then generate description as 1/3 or lower of the max character limit. Don't worry if you miss content or context.
             - If verbosity is 'standard', then generate description as 2/3 of the max character limit.
             - If verbosity is 'text-heavy', then generate description as 3/4 or higher of the max character limit. Make sure it does not exceed the max character limit.
+        {source_context_instructions}
 
         User instructions, tone and verbosity should always be followed and should supercede any other instruction, except for max and min character limit, slide schema and number of items.
 
@@ -64,7 +72,17 @@ def get_system_prompt(
     """
 
 
-def get_user_prompt(outline: str, language: str):
+def get_user_prompt(
+    outline: str,
+    language: str,
+    source_context: Optional[str] = None,
+):
+    source_block = ""
+    if source_context:
+        source_block = f"""
+        ## Source Context
+        {source_context}
+        """
     return f"""
         ## Current Date and Time
         {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -77,6 +95,7 @@ def get_user_prompt(outline: str, language: str):
 
         ## Slide Outline
         {outline}
+        {source_block}
     """
 
 
@@ -86,14 +105,15 @@ def get_messages(
     tone: Optional[str] = None,
     verbosity: Optional[str] = None,
     instructions: Optional[str] = None,
+    source_context: Optional[str] = None,
 ):
 
     return [
         LLMSystemMessage(
-            content=get_system_prompt(tone, verbosity, instructions),
+            content=get_system_prompt(tone, verbosity, instructions, source_context),
         ),
         LLMUserMessage(
-            content=get_user_prompt(outline, language),
+            content=get_user_prompt(outline, language, source_context),
         ),
     ]
 
@@ -105,6 +125,7 @@ async def get_slide_content_from_type_and_outline(
     tone: Optional[str] = None,
     verbosity: Optional[str] = None,
     instructions: Optional[str] = None,
+    source_context: Optional[str] = None,
 ):
     client = LLMClient()
     model = get_model()
@@ -310,6 +331,7 @@ async def get_slide_content_from_type_and_outline(
                 tone,
                 verbosity,
                 instructions,
+                source_context,
             ),
             response_format=response_schema,
             strict=False,

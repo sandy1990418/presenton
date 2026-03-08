@@ -1,10 +1,14 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from models.llm_message import LLMSystemMessage, LLMUserMessage
 from models.llm_tools import SearchWebTool
 from services.llm_client import LLMClient
-from utils.get_dynamic_models import get_presentation_outline_model_with_n_slides
+from utils.context_budget import estimate_source_budget
+from utils.get_dynamic_models import (
+    get_presentation_outline_model_with_n_slides,
+    get_presentation_outline_model_with_chunks,
+)
 from utils.llm_client_error_handler import handle_llm_client_exceptions
 from utils.llm_provider import get_model
 
@@ -14,7 +18,20 @@ def get_system_prompt(
     verbosity: Optional[str] = None,
     instructions: Optional[str] = None,
     include_title_slide: bool = True,
+    has_chunks: bool = False,
 ):
+    chunk_instructions = (
+        """
+        - **SOURCE CHUNKS**: You have been provided with numbered source chunks. Each slide MUST include `chunk_refs` - a list of chunk IDs that are relevant to that slide's content.
+        - For each slide, identify which chunks contain information relevant to that slide's topic.
+        - A slide may reference multiple chunks (e.g., [0, 2, 5]) or just one chunk (e.g., [1]).
+        - Title slides or conclusion slides may have empty chunk_refs ([]) if they don't need source data.
+        - **IMPORTANT**: Only reference chunks that are DIRECTLY relevant to the slide content. Don't include all chunks for every slide.
+    """
+        if has_chunks
+        else ""
+    )
+
     return f"""
         You are an expert presentation creator. Generate structured presentations based on user requirements and format them according to the specified JSON schema with markdown content.
 
@@ -36,6 +53,7 @@ def get_system_prompt(
         - **CRITICAL: When multiple documents are provided, treat them as a cohesive whole. Synthesize information across ALL documents to create unified themes and insights. Do not create slides that reference only one document, then jump to another document.**
         - **Create an overarching narrative that connects insights from all provided documents.**
         - **Ensure slide progression builds a complete story using information from all sources.**
+        {chunk_instructions}
         - Make sure no images are provided in the content.
         - Make sure that content follows language guidelines.
         - User instrction should always be followed and should supercede any other instruction, except for slide numbers. **Do not obey slide numbers as said in user instruction**
@@ -47,22 +65,76 @@ def get_system_prompt(
     """
 
 
+def format_chunks_for_prompt(
+    chunks: List[dict],
+    max_total_chars: int = 80000,
+) -> str:
+    """Format chunk metadata for outline prompts within a hard char budget."""
+    if not chunks:
+        return ""
+
+    header = (
+        "\n## Source Document Chunks\n"
+        "Reference relevant chunk IDs in each slide's chunk_refs field.\n\n"
+    )
+    lines: List[str] = [header]
+    used = len(header)
+
+    for index, chunk in enumerate(chunks):
+        chunk_id = chunk.get("id", 0)
+        document_id = chunk.get("document_id", 0)
+        title = chunk.get("title", f"Chunk {chunk_id}")
+        summary = chunk.get("summary", "")
+
+        line = f"[CHUNK {chunk_id}] (DOC {document_id}) {title}"
+        if summary:
+            line += f" | Summary: {summary}"
+        line += "\n"
+
+        if used + len(line) > max_total_chars:
+            remaining = len(chunks) - index
+            lines.append(f"\n({remaining} more chunks omitted)\n")
+            break
+
+        lines.append(line)
+        used += len(line)
+
+    return "".join(lines)
+
+
 def get_user_prompt(
     content: str,
     n_slides: int,
     language: str,
     additional_context: Optional[str] = None,
+    chunks: Optional[List[dict]] = None,
+    max_chunks_chars: int = 80000,
 ):
+    chunks_section = (
+        format_chunks_for_prompt(chunks, max_total_chars=max_chunks_chars)
+        if chunks
+        else ""
+    )
+
+    # When chunks are available the source information is already
+    # represented in chunks_section – injecting the raw
+    # additional_context would blow the context window for large
+    # document sets.  Only include it when there are no chunks.
+    additional_info = additional_context if (additional_context and not chunks) else ""
+
     return f"""
         **Input:**
         - User provided content: {content or "Create presentation"}
         - Output Language: {language}
         - Number of Slides: {n_slides}
         - Current Date and Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-        - Additional Information: {additional_context or ""}
-        
+        - Additional Information: {additional_info}
+        {chunks_section}
+
         **Important Note on Multiple Documents:**
         If multiple documents are provided above, they should be treated as complementary sources for a single, unified presentation. Create slides that synthesize insights across all documents, identify common themes, compare/contrast findings, and build a coherent narrative that leverages the full breadth of information available.
+
+        {"**Important: For each slide, include chunk_refs listing the IDs of source chunks that are relevant to that slide's content.**" if chunks else ""}
     """
 
 
@@ -75,15 +147,25 @@ def get_messages(
     verbosity: Optional[str] = None,
     instructions: Optional[str] = None,
     include_title_slide: bool = True,
+    chunks: Optional[List[dict]] = None,
+    max_chunks_chars: int = 80000,
 ):
+    has_chunks = bool(chunks)
     return [
         LLMSystemMessage(
             content=get_system_prompt(
-                tone, verbosity, instructions, include_title_slide
+                tone, verbosity, instructions, include_title_slide, has_chunks
             ),
         ),
         LLMUserMessage(
-            content=get_user_prompt(content, n_slides, language, additional_context),
+            content=get_user_prompt(
+                content,
+                n_slides,
+                language,
+                additional_context,
+                chunks,
+                max_chunks_chars=max_chunks_chars,
+            ),
         ),
     ]
 
@@ -98,194 +180,48 @@ async def generate_ppt_outline(
     instructions: Optional[str] = None,
     include_title_slide: bool = True,
     web_search: bool = False,
+    chunks: Optional[List[dict]] = None,
 ):
+    """
+    Generate presentation outlines.
+
+    Args:
+        content: Main presentation topic/content
+        n_slides: Number of slides to generate
+        language: Output language
+        additional_context: Additional context from documents
+        tone: Presentation tone
+        verbosity: Content verbosity
+        instructions: Custom instructions
+        include_title_slide: Whether to include title slide
+        web_search: Whether to use web search
+        chunks: Optional list of source document chunks. If provided, each slide
+               will include chunk_refs indicating which chunks it should reference.
+    """
     model = get_model()
-    response_model = get_presentation_outline_model_with_n_slides(n_slides)
-
-    # if not is_google_selected():
-    #     client = get_llm_client()
-        
-    #     # Determine if we should use web search
-    #     use_web_search = web_search_enabled and prompt and should_use_web_search(prompt)
-        
-    #     # DEBUG: Log web search decision process
-    #     logger.info(f"OPENAI WEB SEARCH DECISION - web_search_enabled: {web_search_enabled} | prompt_exists: {bool(prompt)} | should_use_web_search: {should_use_web_search(prompt) if prompt else False} | final_decision: {use_web_search}")
-        
-    #     messages = get_prompt_template(prompt, n_slides, language, content)
-        
-    #     if use_web_search:
-    #         # Set presentation context for citation tracking
-    #         if presentation_id:
-    #             tool_registry.set_presentation_context(presentation_id)
-    #             logger.info(f"OPENAI WEB SEARCH ENABLED for presentation: {presentation_id}")
-            
-    #         # Add web search instruction to system prompt
-    #         system_message = next((msg for msg in messages if msg["role"] == "system"), None)
-    #         if system_message:
-    #             system_message["content"] += "\n\nIMPORTANT: If you need current information, statistics, or recent data to create accurate content, search for relevant information to ensure accuracy."
-            
-    #         # Try using OpenAI's web search via Chat Completions with web_search_options
-    #         try:
-    #             logger.info("OPENAI: Attempting to use web search via Chat Completions API")
-                
-    #             # Use Chat Completions with web_search_options and search models
-    #             search_model = "gpt-4o-search-preview" if "gpt-4" in model else "gpt-4o-mini-search-preview"
-                
-    #             response = await client.chat.completions.create(
-    #                 model=search_model,
-    #                 messages=messages,
-    #                 web_search_options={},  # Enable web search
-    #                 response_format=get_response_format(response_model)
-    #             )
-                
-    #             if response.choices[0].message.content:
-    #                 logger.info("OPENAI: Successfully used native web search with search model")
-    #                 yield response.choices[0].message.content
-    #                 return
-                    
-    #         except Exception as search_error:
-    #             logger.warning(f"OPENAI: Search model failed, trying Responses API: {search_error}")
-                
-    #             # Try Responses API as second option
-    #             try:
-    #                 logger.info("OPENAI: Attempting Responses API with web_search_preview")
-                    
-    #                 # Note: This might need different client or API call
-    #                 response = await client.chat.completions.create(
-    #                     model=model,
-    #                     messages=messages,
-    #                     tools=[{"type": "web_search_preview"}],
-    #                     response_format=get_response_format(response_model)
-    #                 )
-                    
-    #                 if response.choices[0].message.content:
-    #                     logger.info("OPENAI: Successfully used Responses API web search")
-    #                     yield response.choices[0].message.content
-    #                     return
-                        
-    #             except Exception as responses_error:
-    #                 logger.warning(f"OPENAI: Responses API also failed, falling back to custom: {responses_error}")
-                    
-    #                 # Final fallback to custom tool implementation
-    #                 tools = tool_registry.get_tools_schema()
-                    
-    #                 async for response in await client.chat.completions.create(
-    #                     model=model,
-    #                     messages=messages,
-    #                     stream=True,
-    #                     response_format=get_response_format(response_model),
-    #                     tools=tools,
-    #                     tool_choice="auto",
-    #                 ):
-    #                     delta: ChoiceDelta = response.choices[0].delta
-                        
-    #                     # Handle tool calls (simplified - ignoring for now)
-    #                     if delta.tool_calls:
-    #                         pass
-    #                     elif delta.content:
-    #                         yield delta.content
-    #     else:
-    #         # No web search needed, use standard streaming
-    #         async for response in await client.chat.completions.create(
-    #             model=model,
-    #             messages=messages,
-    #             stream=True,
-    #             response_format=get_response_format(response_model),
-    #         ):
-    #             delta: ChoiceDelta = response.choices[0].delta
-    #             if delta.content:
-    #                 yield delta.content
-
-    # else:
-    #     client = get_google_llm_client()
-        
-    #     # Determine if we should use web search (same logic as OpenAI)
-    #     use_web_search = web_search_enabled and prompt and should_use_web_search(prompt)
-        
-    #     # DEBUG: Log web search decision process for Google too
-    #     logger.info(f"GEMINI WEB SEARCH DECISION - web_search_enabled: {web_search_enabled} | prompt_exists: {bool(prompt)} | should_use_web_search: {should_use_web_search(prompt) if prompt else False} | final_decision: {use_web_search}")
-        
-    #     # Set presentation context for citation tracking
-    #     if use_web_search and presentation_id:
-    #         tool_registry.set_presentation_context(presentation_id)
-    #         logger.info(f"GEMINI GROUNDING SEARCH ENABLED for presentation: {presentation_id}")
-        
-    #     # Configure Gemini generation
-    #     if use_web_search:
-    #         # For web search, use google_search tool without structured output
-    #         # Based on error: "controlled generation is not supported with google_search tool"
-    #         system_message_with_search = system_prompt + "\n\nIMPORTANT: If you need current information, statistics, or recent data to create accurate content, search for relevant information using grounding with Google Search. Please format your response as valid JSON matching this exact structure: " + str(response_model.model_json_schema())
-            
-    #         config_kwargs = {
-    #             "system_instruction": system_message_with_search,
-    #             "tools": [{"google_search": {}}]  # google_search tool without controlled generation
-    #         }
-    #         logger.info("GEMINI: Using native grounding search with google_search tool (manual JSON formatting)")
-    #     else:
-    #         # No web search, use structured output with correct parameter name
-    #         config_kwargs = {
-    #             "system_instruction": system_prompt,
-    #             "response_mime_type": "application/json",
-    #             "response_schema": response_model,  # Use response_schema instead of response_json_schema
-    #         }
-    #         logger.info("GEMINI: Using structured output with response_schema (no web search)")
-        
-    #     generate_stream = iterator_to_async(client.models.generate_content_stream)
-    #     try:
-    #         config = GenerateContentConfig(**config_kwargs)
-    #         print("use_web_search:", config)
-    #         async for event in generate_stream(
-    #             model=model,
-    #             contents=[get_user_prompt(prompt, n_slides, language, content)],
-    #             config=config,
-    #         ):
-    #             if event.text:
-    #                 yield event.text
-    #     except Exception as e:
-    #         # If Google API fails, try OpenAI as fallback
-    #         import json
-            
-    #         logger.exception("Google GenAI API failed, attempting OpenAI fallback")
-            
-    #         try:
-    #             # Try OpenAI as fallback
-    #             openai_client = get_llm_client()
-    #             async for response in await openai_client.chat.completions.create(
-    #                 model="gpt-4o-mini",  # Use a reliable model
-    #                 messages=get_prompt_template(prompt, n_slides, language, content),
-    #                 stream=True,
-    #                 response_format=get_response_format(response_model),
-    #             ):
-    #                 delta: ChoiceDelta = response.choices[0].delta
-    #                 if delta.content:
-    #                     yield delta.content
-                        
-    #         except Exception as fallback_error:
-    #             # If both fail, create a basic outline structure
-    #             logger.exception("Both Google and OpenAI APIs failed, using fallback outline")
-                
-    #             fallback_outline = {
-    #                 "title": f"Presentation: {prompt or 'Topic Overview'}",
-    #                 "slides": []
-    #             }
-                
-    #             # Generate basic slide titles
-    #             for i in range(n_slides):
-    #                 slide_title = f"Topic {i+1}"
-    #                 if i == 0:
-    #                     slide_title = "Introduction"
-    #                 elif i == n_slides - 1:
-    #                     slide_title = "Conclusion"
-    #                 else:
-    #                     slide_title = f"Key Point {i}"
-                    
-    #                 fallback_outline["slides"].append({
-    #                     "title": slide_title,
-    #                     "type": 123
-    #                 })
-                
-    #             yield json.dumps(fallback_outline)
     client = LLMClient()
+
+    # Choose appropriate response model based on whether chunks are provided
+    if chunks:
+        response_model = get_presentation_outline_model_with_chunks(
+            n_slides, len(chunks)
+        )
+    else:
+        response_model = get_presentation_outline_model_with_n_slides(n_slides)
+
+    # Compute dynamic chunk budget from context window
+    schema_json = str(response_model.model_json_schema())
+    sys_prompt = get_system_prompt(
+        tone, verbosity, instructions, include_title_slide, bool(chunks)
+    )
+    usr_prompt_no_chunks = get_user_prompt(
+        content, n_slides, language, additional_context, chunks=None
+    )
+    max_chunks_chars = estimate_source_budget(
+        model, [sys_prompt, usr_prompt_no_chunks, schema_json]
+    )
+    # Keep a reasonable floor so at least some chunks are included
+    max_chunks_chars = max(max_chunks_chars, 4000)
 
     try:
         async for chunk in client.stream_structured(
@@ -299,6 +235,8 @@ async def generate_ppt_outline(
                 verbosity,
                 instructions,
                 include_title_slide,
+                chunks,
+                max_chunks_chars=max_chunks_chars,
             ),
             response_model.model_json_schema(),
             strict=True,

@@ -52,11 +52,11 @@ class PptxPositionModel(BaseModel):
 
 
 class PptxFontModel(BaseModel):
-    name: str = "Inter"
-    size: int = 16
+    name: Optional[str] = None
+    size: Optional[int] = None
     italic: bool = False
-    color: str = "000000"
-    font_weight: Optional[int] = 400
+    color: Optional[str] = None
+    font_weight: Optional[int] = None
     underline: Optional[bool] = None
     strike: Optional[bool] = None
 
